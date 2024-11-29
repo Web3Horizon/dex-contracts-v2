@@ -51,7 +51,7 @@ contract DexerV2Pair is ERC20 {
             liquidity = Math.min(liquidity0, liquidity1);
         }
 
-        if (liquidity < 0) {
+        if (liquidity == 0) {
             revert InsufficientLiquidityMint();
         }
 
