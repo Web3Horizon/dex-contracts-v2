@@ -18,8 +18,8 @@ contract DexerV2Pair is ERC20 {
     event Mint(address sender, uint256 amount0, uint256 amount1);
 
     /* **** Errors **** */
-    error InsufficientLiquidityMint();
-    error InsufficientLiquidityBurn();
+    error DexerV2pair__InsufficientLiquidityMint();
+    error DexerV2pair__InsufficientLiquidityBurn();
 
     // Possibly change for dynamic naming in the future
     constructor(address _token0, address _token1) ERC20("DexerV2Pair", "DXRLP") {
@@ -53,7 +53,7 @@ contract DexerV2Pair is ERC20 {
         }
 
         if (liquidity == 0) {
-            revert InsufficientLiquidityMint();
+            revert DexerV2pair__InsufficientLiquidityMint();
         }
 
         // Mint tokens
@@ -84,7 +84,7 @@ contract DexerV2Pair is ERC20 {
         uint256 poolLPTokens = balanceOf(address(this));
 
         if (poolLPTokens == 0) {
-            revert InsufficientLiquidityBurn();
+            revert DexerV2pair__InsufficientLiquidityBurn();
         }
 
         uint256 _totalSupply = totalSupply();
