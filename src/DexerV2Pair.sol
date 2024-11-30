@@ -41,13 +41,14 @@ contract DexerV2Pair is ERC20 {
         uint256 amount1 = balance1 - reserve1;
 
         uint256 liquidity;
+        uint256 _totalSupply = totalSupply();
 
-        if (totalSupply() == 0) {
+        if (_totalSupply == 0) {
             liquidity = Math.sqrt(amount0 * amount1);
         } else {
             // Get the minimum liquidity contribution
-            uint256 liquidity0 = (totalSupply() * amount0) / reserve0;
-            uint256 liquidity1 = (totalSupply() * amount1) / reserve1;
+            uint256 liquidity0 = (_totalSupply * amount0) / reserve0;
+            uint256 liquidity1 = (_totalSupply * amount1) / reserve1;
             liquidity = Math.min(liquidity0, liquidity1);
         }
 
@@ -75,8 +76,10 @@ contract DexerV2Pair is ERC20 {
      * @return amount1 The amount of token1 transferred to the `to` address.
      */
     function burn(address to) public returns (uint256 amount0, uint256 amount1) {
-        uint256 balance0 = ERC20(token0).balanceOf(address(this));
-        uint256 balance1 = ERC20(token1).balanceOf(address(this));
+        address _token0 = token0;
+        address _token1 = token1;
+        uint256 balance0 = ERC20(_token0).balanceOf(address(this));
+        uint256 balance1 = ERC20(_token1).balanceOf(address(this));
 
         uint256 poolLPTokens = balanceOf(address(this));
 
@@ -84,17 +87,18 @@ contract DexerV2Pair is ERC20 {
             revert InsufficientLiquidityBurn();
         }
 
-        uint256 amount0ToTransfer = (poolLPTokens * balance0) / totalSupply();
-        uint256 amount1ToTransfer = (poolLPTokens * balance1) / totalSupply();
+        uint256 _totalSupply = totalSupply();
+        uint256 amount0ToTransfer = (poolLPTokens * balance0) / _totalSupply;
+        uint256 amount1ToTransfer = (poolLPTokens * balance1) / _totalSupply;
 
-        _burn(msg.sender, poolLPTokens);
+        _burn(address(this), poolLPTokens);
 
         // Transfer tokens
-        ERC20(token0).transfer(to, amount0ToTransfer);
-        ERC20(token1).transfer(to, amount1ToTransfer);
+        ERC20(_token0).transfer(to, amount0ToTransfer);
+        ERC20(_token1).transfer(to, amount1ToTransfer);
 
-        balance0 = ERC20(token0).balanceOf(address(this));
-        balance1 = ERC20(token1).balanceOf(address(this));
+        balance0 = ERC20(_token0).balanceOf(address(this));
+        balance1 = ERC20(_token1).balanceOf(address(this));
 
         // Update reserves
         _update(balance0, balance1);
