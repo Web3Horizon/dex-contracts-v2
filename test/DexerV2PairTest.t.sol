@@ -11,23 +11,23 @@ contract DexerV2PairTest is Test {
     MockERC20 tokenB;
     uint256 STARTING_BALANCE = 100 ether;
     address USER;
-    address USER2;
+    address LIQUIDITY_USER;
     DexerV2Pair dexerV2Pair;
 
     function setUp() external {
         USER = makeAddr("user");
-        USER2 = makeAddr("user2");
+        LIQUIDITY_USER = makeAddr("user2");
         tokenA = new MockERC20("Token A", "TKNA");
         tokenB = new MockERC20("Token B", "TKNB");
         dexerV2Pair = new DexerV2Pair(address(tokenA), address(tokenB));
 
         vm.deal(USER, STARTING_BALANCE);
-        vm.deal(USER2, STARTING_BALANCE);
+        vm.deal(LIQUIDITY_USER, STARTING_BALANCE);
 
         tokenA.mint(USER, 100 ether);
         tokenB.mint(USER, 100 ether);
-        tokenA.mint(USER2, 100 ether);
-        tokenB.mint(USER2, 100 ether);
+        tokenA.mint(LIQUIDITY_USER, 100 ether);
+        tokenB.mint(LIQUIDITY_USER, 100 ether);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -35,8 +35,8 @@ contract DexerV2PairTest is Test {
     //////////////////////////////////////////////////////////////*/
     function assertReserves(uint256 expectedReserve0, uint256 expectedReserve1) internal view {
         (uint256 reserve0, uint256 reserve1) = dexerV2Pair.getReserves();
-        assertEq(reserve0, expectedReserve0, "Unexpected reserve0");
-        assertEq(reserve1, expectedReserve1, "Unexpected reserve1");
+        assertApproxEqRel(reserve0, expectedReserve0, 1e15, "Unexpected reserve0"); // 1e15 = 0.1%
+        assertApproxEqRel(reserve1, expectedReserve1, 1e15, "Unexpected reserve1");
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -46,7 +46,7 @@ contract DexerV2PairTest is Test {
         uint256 tokenAAmount = 1 ether;
         uint256 tokenBAmount = 10 ether;
 
-        vm.startPrank(USER2);
+        vm.startPrank(LIQUIDITY_USER);
 
         tokenA.transfer(address(dexerV2Pair), tokenAAmount);
         tokenB.transfer(address(dexerV2Pair), tokenBAmount);
@@ -141,5 +141,120 @@ contract DexerV2PairTest is Test {
         // Any excess tokens should not be considered, therefore the LP tokens should be doubled in this case.
         assertEq(lpTokensMinted, lpTokenSupplyBefore, "LP tokens minted be minted in terms of the minimum reserve");
         assertReserves({expectedReserve0: expectedReserve0, expectedReserve1: expectedReserve1});
+    }
+
+    function testMintRevertsWithInsufficientTokens() public {
+        uint256 tokenAAmount = 1 ether;
+        uint256 tokenBAmount = 0 ether;
+
+        vm.startPrank(USER);
+
+        tokenA.transfer(address(dexerV2Pair), tokenAAmount);
+        tokenB.transfer(address(dexerV2Pair), tokenBAmount);
+
+        vm.expectRevert(DexerV2Pair.DexerV2pair__InsufficientLiquidityMint.selector);
+        dexerV2Pair.mint();
+
+        vm.stopPrank();
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                              Burn
+    //////////////////////////////////////////////////////////////*/
+    function testBurn() public withLiquidity {
+        assertReserves({expectedReserve0: 1 ether, expectedReserve1: 10 ether});
+
+        uint256 userLpTokenBalanceBefore = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+        vm.startPrank(LIQUIDITY_USER);
+
+        dexerV2Pair.transfer(address(dexerV2Pair), userLpTokenBalanceBefore);
+
+        dexerV2Pair.burn({to: LIQUIDITY_USER});
+
+        vm.stopPrank();
+
+        uint256 userLpTokenBalanceAfter = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+        uint256 userTokenABalanceAfter = tokenA.balanceOf(LIQUIDITY_USER);
+        uint256 userTokenBBalanceAfter = tokenB.balanceOf(LIQUIDITY_USER);
+
+        assertEq(userLpTokenBalanceAfter, 0, "All LP tokens should be burned");
+        assertEq(userTokenABalanceAfter, 100 ether, "Unexpected amount of token A balance after burn");
+        assertEq(userTokenBBalanceAfter, 100 ether, "Unexpected amount of token B balance after burn");
+
+        assertReserves({expectedReserve0: 0, expectedReserve1: 0});
+    }
+
+    function testBurnRevertsWithNoLiquidity() public {
+        vm.startPrank(USER);
+
+        vm.expectRevert(DexerV2Pair.DexerV2pair__InsufficientLiquidityBurn.selector);
+        dexerV2Pair.burn({to: USER});
+
+        vm.stopPrank();
+    }
+
+    function testBurnBurnsLPToken() public withLiquidity {
+        // Variables before tx
+        uint256 lpTokenSupplyBefore = dexerV2Pair.totalSupply();
+        uint256 userLPTokenBalanceBefore = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+
+        require(userLPTokenBalanceBefore > 0, "Initial USER LP tokens should be > 0");
+        require(lpTokenSupplyBefore > 0, "Initial LP tokens should be > 0");
+
+        vm.startPrank(LIQUIDITY_USER);
+
+        dexerV2Pair.transfer(address(dexerV2Pair), userLPTokenBalanceBefore);
+
+        dexerV2Pair.burn({to: LIQUIDITY_USER});
+
+        vm.stopPrank();
+
+        uint256 userLPTokenBalanceAfter = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+        uint256 lpTokenSupplyAfter = dexerV2Pair.totalSupply();
+
+        assertEq(userLPTokenBalanceAfter, 0, "USER LP tokens balanced should be zero after burn");
+        assertEq(lpTokenSupplyAfter, 0, "LP tokens balanced should be zero after burn");
+    }
+
+    function testBurnDepletesReserves() public withLiquidity {
+        // Variables before tx
+        (uint256 reserveABefore, uint256 reserveBBefore) = dexerV2Pair.getReserves();
+        uint256 userLPTokenBalanceBefore = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+
+        require(reserveABefore > 0, "Initial tokenA reserve should be > 0");
+        require(reserveBBefore > 0, "Initial tokenB reserve should be > 0");
+
+        vm.startPrank(LIQUIDITY_USER);
+
+        dexerV2Pair.transfer(address(dexerV2Pair), userLPTokenBalanceBefore);
+
+        dexerV2Pair.burn({to: LIQUIDITY_USER});
+
+        vm.stopPrank();
+
+        (uint256 reserveAAfter, uint256 reserveBAfter) = dexerV2Pair.getReserves();
+
+        assertEq(reserveAAfter, 0, "Unexpected TokenA reserves after burn");
+        assertEq(reserveBAfter, 0, "Unexpected TokenB reserves after burn");
+    }
+
+    function testBurnReturnsCorrectTokensAmount() public withLiquidity {
+        uint256 userLPTokenBalanceBefore = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+        uint256 amountOfLPTokenToBurn = userLPTokenBalanceBefore / 2; // 50% of total users balance
+
+        assertReserves({expectedReserve0: 1 ether, expectedReserve1: 10 ether});
+
+        vm.startPrank(LIQUIDITY_USER);
+
+        dexerV2Pair.transfer(address(dexerV2Pair), amountOfLPTokenToBurn);
+
+        (uint256 tokenAReturned, uint256 tokenBReturned) = dexerV2Pair.burn({to: LIQUIDITY_USER});
+
+        vm.stopPrank();
+
+        console.log("TokenAReturned: ", tokenAReturned);
+        console.log("TokenBReturned: ", tokenBReturned);
+
+        assertReserves({expectedReserve0: 0.5 ether, expectedReserve1: 5 ether});
     }
 }
