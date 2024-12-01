@@ -42,8 +42,8 @@ contract DexerV2Pair is ERC20 {
      */
     function mint() public returns (uint256) {
         // The balance after tokens have been sent
-        uint256 balance0 = ERC20(token0).balanceOf(address(this));
-        uint256 balance1 = ERC20(token1).balanceOf(address(this));
+        uint256 balance0 = IERC20(token0).balanceOf(address(this));
+        uint256 balance1 = IERC20(token1).balanceOf(address(this));
 
         // The amount of tokens sent by the user
         uint256 amount0 = balance0 - reserve0;
@@ -87,8 +87,8 @@ contract DexerV2Pair is ERC20 {
     function burn(address to) public returns (uint256 amount0, uint256 amount1) {
         address _token0 = token0;
         address _token1 = token1;
-        uint256 balance0 = ERC20(_token0).balanceOf(address(this));
-        uint256 balance1 = ERC20(_token1).balanceOf(address(this));
+        uint256 balance0 = IERC20(_token0).balanceOf(address(this));
+        uint256 balance1 = IERC20(_token1).balanceOf(address(this));
 
         uint256 poolLPTokens = balanceOf(address(this));
 
@@ -103,11 +103,11 @@ contract DexerV2Pair is ERC20 {
         _burn(address(this), poolLPTokens);
 
         // Transfer tokens
-        ERC20(_token0).transfer(to, amount0ToTransfer);
-        ERC20(_token1).transfer(to, amount1ToTransfer);
+        IERC20(_token0).safeTransfer(to, amount0ToTransfer);
+        IERC20(_token1).safeTransfer(to, amount1ToTransfer);
 
-        balance0 = ERC20(_token0).balanceOf(address(this));
-        balance1 = ERC20(_token1).balanceOf(address(this));
+        balance0 = IERC20(_token0).balanceOf(address(this));
+        balance1 = IERC20(_token1).balanceOf(address(this));
 
         // Update reserves
         _update(balance0, balance1);
