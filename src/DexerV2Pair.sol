@@ -2,11 +2,15 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /* **** Errors **** */
 
 contract DexerV2Pair is ERC20 {
+    using SafeERC20 for IERC20;
+
     address public token0;
     address public token1;
 
@@ -16,10 +20,15 @@ contract DexerV2Pair is ERC20 {
     /* **** Events **** */
     event Burn(address sender, uint256 amount0, uint256 amount1, address to);
     event Mint(address sender, uint256 amount0, uint256 amount1);
+    event Swap(address indexed sender, uint256 amount0Out, uint256 amount1Out, address indexed to);
 
     /* **** Errors **** */
     error DexerV2pair__InsufficientLiquidityMint();
     error DexerV2pair__InsufficientLiquidityBurn();
+    error DexerV2Pair__InsufficientOutputAmount();
+    error DexerV2Pair__InsufficientInputAmount();
+    error DexerV2Pair__InsufficientLiquidity();
+    error DexerV2Pair__InvalidK();
 
     // Possibly change for dynamic naming in the future
     constructor(address _token0, address _token1) ERC20("DexerV2Pair", "DXRLP") {
@@ -108,13 +117,81 @@ contract DexerV2Pair is ERC20 {
         return (amount0ToTransfer, amount1ToTransfer);
     }
 
+    /**
+     * @notice Executes a swap of tokens by transferring specified output amounts
+     *         of token0 and token1 to the given address, ensuring the invariant
+     *         is maintained.
+     * @dev The function reverts if the output amounts are invalid or exceed reserves.
+     * @param amount0Out The amount of token0 to be sent to the recipient.
+     * @param amount1Out The amount of token1 to be sent to the recipient.
+     * @param to The address receiving the output tokens.
+     * @custom:reverts DexerV2Pair__InsufficientOutputAmount If both output amounts are zero.
+     * @custom:reverts DexerV2Pair__InsufficientLiquidity If output amounts exceed available reserves.
+     * @custom:reverts DexerV2Pair__InsufficientInputAmount If no input tokens are provided to balance the swap.
+     * @custom:reverts DexerV2Pair__InvalidK If the invariant constant is violated after the swap.
+     */
+    function swap(uint256 amount0Out, uint256 amount1Out, address to) public {
+        if (amount0Out == 0 && amount1Out == 0) {
+            revert DexerV2Pair__InsufficientOutputAmount();
+        }
+
+        (uint256 _reserve0, uint256 _reserve1) = getReserves();
+
+        // Ensure enough reserves
+        if (amount0Out > _reserve0 || amount1Out > _reserve1) {
+            revert DexerV2Pair__InsufficientLiquidity();
+        }
+
+        uint256 balance0 = IERC20(token0).balanceOf(address(this));
+        uint256 balance1 = IERC20(token1).balanceOf(address(this));
+
+        uint256 amount0In = balance0 - (_reserve0 - amount0Out);
+        uint256 amount1In = balance1 - (_reserve1 - amount0Out);
+
+        if (amount0In == 0 && amount1In == 0) {
+            revert DexerV2Pair__InsufficientInputAmount();
+        }
+
+        uint256 newReserve0 = balance0 - amount0Out;
+        uint256 newReserve1 = balance1 - amount1Out;
+
+        // Verify the invariant contant (k)
+        if (newReserve0 * newReserve1 < _reserve0 * _reserve1) {
+            revert DexerV2Pair__InvalidK();
+        }
+
+        IERC20(token0).safeTransfer(to, amount0Out);
+        IERC20(token1).safeTransfer(to, amount1Out);
+
+        _update({balance0: newReserve0, balance1: newReserve1});
+
+        emit Swap({sender: msg.sender, amount0Out: amount0Out, amount1Out: amount1Out, to: to});
+    }
+
     /* **** Getter functions **** */
+
+    /**
+     * @notice Retrieves the last recorded reserves of token0 and token1 in the liquidity pool.
+     * @dev The reserves represent the pool's state after the most recent mint, burn, or swap operation.
+     *      They may differ from the actual token balances in the contract, as reserves are updated only
+     *      through these operations and not through direct token transfers.
+     * @return reserve0 The last updated reserve amount of token0 in the pool.
+     * @return reserve1 The last updated reserve amount of token1 in the pool.
+     */
     function getReserves() public view returns (uint256, uint256) {
         return (reserve0, reserve1);
     }
 
     /* **** Private functions **** */
 
+    /**
+     * @notice Updates the reserve values for token0 and token1 in the liquidity pool.
+     * @dev This function is called internally to synchronize the reserves with the current
+     *      balances of token0 and token1 held by the contract. It does not perform any validation
+     *      or balance checks and assumes that the provided balances are accurate and up-to-date.
+     * @param balance0 The new balance of token0 to update the reserve.
+     * @param balance1 The new balance of token1 to update the reserve.
+     */
     function _update(uint256 balance0, uint256 balance1) private {
         reserve0 = balance0;
         reserve1 = balance1;
