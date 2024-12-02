@@ -47,7 +47,7 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
      * @param _token1 The address of the second token in the pair.
      * @custom:reverts DexerV2Pair__AlreadyInitialized If the contract has already been initialized with token addresses.
      */
-    function initialize(address _token0, address _token1) public {
+    function initialize(address _token0, address _token1) external {
         if (token0 != address(0) || token1 != address(0)) {
             revert DexerV2Pair__AlreadyInitialized();
         }
@@ -64,7 +64,7 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
      * @dev Mints LP tokens to the caller.
      * @return The amount of LP tokens minted.
      */
-    function mint() public returns (uint256) {
+    function mint() external returns (uint256) {
         // The balance after tokens have been sent
         uint256 balance0 = IERC20(token0).balanceOf(address(this));
         uint256 balance1 = IERC20(token1).balanceOf(address(this));
@@ -108,7 +108,7 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
      * @return amount0 The amount of token0 transferred to the `to` address.
      * @return amount1 The amount of token1 transferred to the `to` address.
      */
-    function burn(address to) public returns (uint256 amount0, uint256 amount1) {
+    function burn(address to) external returns (uint256 amount0, uint256 amount1) {
         address _token0 = token0;
         address _token1 = token1;
         uint256 balance0 = IERC20(_token0).balanceOf(address(this));
@@ -154,7 +154,7 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
      * @custom:reverts DexerV2Pair__InsufficientInputAmount If no input tokens are provided to balance the swap.
      * @custom:reverts DexerV2Pair__InvalidK If the invariant constant is violated after the swap.
      */
-    function swap(uint256 amount0Out, uint256 amount1Out, address to) public {
+    function swap(uint256 amount0Out, uint256 amount1Out, address to) external {
         if (amount0Out == 0 && amount1Out == 0) {
             revert DexerV2Pair__InsufficientOutputAmount();
         }
@@ -166,28 +166,34 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
             revert DexerV2Pair__InsufficientLiquidity();
         }
 
-        uint256 balance0 = IERC20(token0).balanceOf(address(this));
-        uint256 balance1 = IERC20(token1).balanceOf(address(this));
+        address _token0 = token0;
+        address _token1 = token1;
 
-        uint256 amount0In = balance0 - (_reserve0 - amount0Out);
-        uint256 amount1In = balance1 - (_reserve1 - amount0Out);
+        // Optimiscally transfer tokens
+        if (amount0Out > 0) IERC20(_token0).safeTransfer(to, amount0Out);
+        if (amount1Out > 0) IERC20(_token1).safeTransfer(to, amount1Out);
+
+        // Balances after the transfer
+        uint256 balance0 = IERC20(_token0).balanceOf(address(this));
+        uint256 balance1 = IERC20(_token1).balanceOf(address(this));
+
+        uint256 amount0In = balance0 > _reserve0 - amount0Out ? balance0 - (_reserve0 - amount0Out) : 0;
+        uint256 amount1In = balance1 > _reserve1 - amount1Out ? balance1 - (_reserve1 - amount1Out) : 0;
 
         if (amount0In == 0 && amount1In == 0) {
             revert DexerV2Pair__InsufficientInputAmount();
         }
 
-        uint256 newReserve0 = balance0 - amount0Out;
-        uint256 newReserve1 = balance1 - amount1Out;
+        // Balance after swap - swap fee 0.3%
+        uint256 balance0Adjusted = (balance0 * 1000) - (amount0In * 3);
+        uint256 balance1Adjusted = (balance1 * 1000) - (amount1In * 3);
 
         // Verify the invariant contant (k)
-        if (newReserve0 * newReserve1 < _reserve0 * _reserve1) {
+        if (balance0Adjusted * balance1Adjusted < _reserve0 * _reserve1 * (1000 ** 2)) {
             revert DexerV2Pair__InvalidK();
         }
 
-        IERC20(token0).safeTransfer(to, amount0Out);
-        IERC20(token1).safeTransfer(to, amount1Out);
-
-        _update({balance0: newReserve0, balance1: newReserve1});
+        _update({balance0: balance0, balance1: balance1});
 
         emit Swap({sender: msg.sender, amount0Out: amount0Out, amount1Out: amount1Out, to: to});
     }
