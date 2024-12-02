@@ -6,9 +6,9 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-/* **** Errors **** */
+import {IDexerV2Pair} from "src/interfaces/IDexerV2Pair.sol";
 
-contract DexerV2Pair is ERC20 {
+contract DexerV2Pair is IDexerV2Pair, ERC20 {
     using SafeERC20 for IERC20;
 
     address public token0;
@@ -29,9 +29,25 @@ contract DexerV2Pair is ERC20 {
     error DexerV2Pair__InsufficientInputAmount();
     error DexerV2Pair__InsufficientLiquidity();
     error DexerV2Pair__InvalidK();
+    error DexerV2Pair__AlreadyInitialized();
 
     // Possibly change for dynamic naming in the future
-    constructor(address _token0, address _token1) ERC20("DexerV2Pair", "DXRLP") {
+    constructor() ERC20("DexerV2Pair", "DXRLP") {}
+
+    /**
+     * @notice Sets the pair contract with the two token addresses.
+     * @dev This function can only be called once to prevent reinitialization.
+     *      Ensures that the token addresses are set for the contract and
+     *      enforces that the contract has not been initialized already.
+     * @param _token0 The address of the first token in the pair.
+     * @param _token1 The address of the second token in the pair.
+     * @custom:reverts DexerV2Pair__AlreadyInitialized If the contract has already been initialized with token addresses.
+     */
+    function initialize(address _token0, address _token1) public {
+        if (token0 != address(0) || token1 != address(0)) {
+            revert DexerV2Pair__AlreadyInitialized();
+        }
+
         token0 = _token0;
         token1 = _token1;
     }
