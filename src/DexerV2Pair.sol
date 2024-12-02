@@ -13,6 +13,7 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
 
     address public token0;
     address public token1;
+    address public factory;
 
     uint256 private reserve0;
     uint256 private reserve1;
@@ -30,9 +31,12 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
     error DexerV2Pair__InsufficientLiquidity();
     error DexerV2Pair__InvalidK();
     error DexerV2Pair__AlreadyInitialized();
+    error DexerV2Pair__Unauthorized();
 
     // Possibly change for dynamic naming in the future
-    constructor() ERC20("DexerV2Pair", "DXRLP") {}
+    constructor() ERC20("DexerV2Pair", "DXRLP") {
+        factory = msg.sender;
+    }
 
     /**
      * @notice Sets the pair contract with the two token addresses.
@@ -46,6 +50,10 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
     function initialize(address _token0, address _token1) public {
         if (token0 != address(0) || token1 != address(0)) {
             revert DexerV2Pair__AlreadyInitialized();
+        }
+
+        if (msg.sender != factory) {
+            revert DexerV2Pair__Unauthorized();
         }
 
         token0 = _token0;
