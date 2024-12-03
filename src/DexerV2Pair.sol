@@ -64,7 +64,7 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
      * @dev Mints LP tokens to the caller.
      * @return The amount of LP tokens minted.
      */
-    function mint() external returns (uint256) {
+    function mint(address to) external returns (uint256) {
         // The balance after tokens have been sent
         uint256 balance0 = IERC20(token0).balanceOf(address(this));
         uint256 balance1 = IERC20(token1).balanceOf(address(this));
@@ -90,7 +90,7 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
         }
 
         // Mint tokens
-        _mint(msg.sender, liquidity);
+        _mint(to, liquidity);
 
         // Update balances
         _update(balance0, balance1);

@@ -70,7 +70,7 @@ contract DexerV2PairTest is Test {
         tokenA.transfer(address(dexerV2Pair), tokenAAmount);
         tokenB.transfer(address(dexerV2Pair), tokenBAmount);
 
-        dexerV2Pair.mint();
+        dexerV2Pair.mint({to: LIQUIDITY_USER});
 
         vm.stopPrank();
         _;
@@ -106,7 +106,7 @@ contract DexerV2PairTest is Test {
         tokenA.transfer(address(dexerV2Pair), tokenAAmount);
         tokenB.transfer(address(dexerV2Pair), tokenBAmount);
 
-        uint256 lpTokensMinted = dexerV2Pair.mint();
+        uint256 lpTokensMinted = dexerV2Pair.mint({to: USER});
 
         vm.stopPrank(); // End prank
 
@@ -133,7 +133,7 @@ contract DexerV2PairTest is Test {
         tokenA.transfer(address(dexerV2Pair), tokenAAmount);
         tokenB.transfer(address(dexerV2Pair), tokenBAmount);
 
-        uint256 lpTokensMinted = dexerV2Pair.mint();
+        uint256 lpTokensMinted = dexerV2Pair.mint({to: USER});
 
         vm.stopPrank();
 
@@ -166,7 +166,7 @@ contract DexerV2PairTest is Test {
         tokenA.transfer(address(dexerV2Pair), tokenAAmount);
         tokenB.transfer(address(dexerV2Pair), tokenBAmount);
 
-        uint256 lpTokensMinted = dexerV2Pair.mint();
+        uint256 lpTokensMinted = dexerV2Pair.mint({to: USER});
 
         vm.stopPrank();
 
@@ -190,7 +190,7 @@ contract DexerV2PairTest is Test {
         tokenB.transfer(address(dexerV2Pair), tokenBAmount);
 
         vm.expectRevert(DexerV2Pair.DexerV2pair__InsufficientLiquidityMint.selector);
-        dexerV2Pair.mint();
+        dexerV2Pair.mint({to: USER});
 
         vm.stopPrank();
     }
