@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import {Test, console} from "forge-std/Test.sol";
 import {DexerV2Pair} from "src/DexerV2Pair.sol";
+import {DexerV2Factory} from "src/DexerV2Factory.sol";
 import {MockERC20} from "src/mocks/MockERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
@@ -13,13 +14,31 @@ contract DexerV2PairTest is Test {
     address USER;
     address LIQUIDITY_USER;
     DexerV2Pair dexerV2Pair;
+    DexerV2Factory dexerV2Factory;
 
     function setUp() external {
         USER = makeAddr("user");
         LIQUIDITY_USER = makeAddr("user2");
-        tokenA = new MockERC20("Token A", "TKNA");
-        tokenB = new MockERC20("Token B", "TKNB");
-        dexerV2Pair = new DexerV2Pair(address(tokenA), address(tokenB));
+
+        // Mock tokens
+
+        MockERC20 token0 = new MockERC20("Token0", "TKN0");
+        MockERC20 token1 = new MockERC20("Token1", "TKN1");
+
+        (tokenA, tokenB) = address(token0) < address(token1) ? (token0, token1) : (token1, token0);
+
+        // tokenA = new MockERC20("Token A", "TKNA");
+        // tokenB = new MockERC20("Token B", "TKNB");
+
+        // Pair and factory contracts
+        dexerV2Factory = new DexerV2Factory();
+        // dexerV2Pair = new DexerV2Pair();
+
+        address pair = dexerV2Factory.createPair(address(tokenA), address(tokenB));
+
+        dexerV2Pair = DexerV2Pair(pair);
+
+        // dexerV2Pair.initialize(address(tokenA), address(tokenB));
 
         vm.deal(USER, STARTING_BALANCE);
         vm.deal(LIQUIDITY_USER, STARTING_BALANCE);
@@ -55,6 +74,24 @@ contract DexerV2PairTest is Test {
 
         vm.stopPrank();
         _;
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                              Initialize
+    //////////////////////////////////////////////////////////////*/
+
+    function testInitialize() public {
+        address token0 = dexerV2Pair.token0();
+        address token1 = dexerV2Pair.token1();
+
+        // Ensure tokens are initialized correctly
+        assertEq(token0, address(tokenA), "Token0 does not match expected");
+        assertEq(token1, address(tokenB), "Token1 does not match expected");
+
+        // Ensure the pair contract's reserves start at zero
+        (uint256 reserve0, uint256 reserve1) = dexerV2Pair.getReserves();
+        assertEq(reserve0, 0, "Initial reserve0 is not zero");
+        assertEq(reserve1, 0, "Initial reserve1 is not zero");
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -256,5 +293,140 @@ contract DexerV2PairTest is Test {
         console.log("TokenBReturned: ", tokenBReturned);
 
         assertReserves({expectedReserve0: 0.5 ether, expectedReserve1: 5 ether});
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                              Swap
+    //////////////////////////////////////////////////////////////*/
+
+    function testSwap() public withLiquidity {
+        uint256 amountAIn = 1 ether;
+        uint256 amountBIn = 0 ether;
+        uint256 amountAOut = 0 ether;
+        uint256 amountBOut = 4.9924 ether;
+
+        (uint256 reserveABefore, uint256 reserveBBefore) = dexerV2Pair.getReserves();
+
+        vm.startPrank(USER);
+
+        tokenA.transfer(address(dexerV2Pair), amountAIn);
+        tokenB.transfer(address(dexerV2Pair), amountBIn);
+
+        dexerV2Pair.swap({amount0Out: amountAOut, amount1Out: amountBOut, to: USER});
+
+        vm.stopPrank();
+
+        uint256 expectedReserveA = reserveABefore + amountAIn - amountAOut;
+        uint256 expectedReserveB = reserveBBefore + amountBIn - amountBOut;
+
+        assertReserves(expectedReserveA, expectedReserveB);
+    }
+
+    function testSwapOtherToken() public withLiquidity {
+        uint256 amountAIn = 0 ether;
+        uint256 amountBIn = 1 ether;
+        uint256 amountAOut = 0.09 ether;
+        uint256 amountBOut = 0 ether;
+
+        (uint256 reserveABefore, uint256 reserveBBefore) = dexerV2Pair.getReserves();
+
+        vm.startPrank(USER);
+
+        tokenA.transfer(address(dexerV2Pair), amountAIn);
+        tokenB.transfer(address(dexerV2Pair), amountBIn);
+
+        dexerV2Pair.swap({amount0Out: amountAOut, amount1Out: amountBOut, to: USER});
+
+        vm.stopPrank();
+
+        uint256 expectedReserveA = reserveABefore + amountAIn - amountAOut;
+        uint256 expectedReserveB = reserveBBefore + amountBIn - amountBOut;
+
+        assertReserves(expectedReserveA, expectedReserveB);
+    }
+
+    function testSwapRevertsIfOverpriced() public withLiquidity {
+        uint256 amountAIn = 1 ether;
+        uint256 amountBIn = 0 ether;
+        uint256 amountAOut = 0 ether;
+        uint256 amountBOut = 7 ether;
+
+        vm.startPrank(USER);
+
+        tokenA.transfer(address(dexerV2Pair), amountAIn);
+        tokenB.transfer(address(dexerV2Pair), amountBIn);
+
+        vm.expectRevert(DexerV2Pair.DexerV2Pair__InvalidK.selector);
+        dexerV2Pair.swap({amount0Out: amountAOut, amount1Out: amountBOut, to: USER});
+
+        vm.stopPrank();
+    }
+
+    function testSwapRevertsIfOverpricedOtherToken() public withLiquidity {
+        uint256 amountAIn = 0 ether;
+        uint256 amountBIn = 1 ether;
+        uint256 amountAOut = 0.5 ether;
+        uint256 amountBOut = 0 ether;
+
+        vm.startPrank(USER);
+
+        tokenA.transfer(address(dexerV2Pair), amountAIn);
+        tokenB.transfer(address(dexerV2Pair), amountBIn);
+
+        vm.expectRevert(DexerV2Pair.DexerV2Pair__InvalidK.selector);
+        dexerV2Pair.swap({amount0Out: amountAOut, amount1Out: amountBOut, to: USER});
+
+        vm.stopPrank();
+    }
+
+    function testSwapRevertsIfInsufficientLiquidity() public withLiquidity {
+        uint256 amountAIn = 1 ether;
+        uint256 amountBIn = 0 ether;
+        uint256 amountAOut = 0 ether;
+        uint256 amountBOut = 11 ether;
+
+        vm.startPrank(USER);
+
+        tokenA.transfer(address(dexerV2Pair), amountAIn);
+        tokenB.transfer(address(dexerV2Pair), amountBIn);
+
+        vm.expectRevert(DexerV2Pair.DexerV2Pair__InsufficientLiquidity.selector);
+        dexerV2Pair.swap({amount0Out: amountAOut, amount1Out: amountBOut, to: USER});
+
+        vm.stopPrank();
+    }
+
+    function testSwapRevertsIfZeroOutput() public withLiquidity {
+        uint256 amountAIn = 1 ether;
+        uint256 amountBIn = 0 ether;
+        uint256 amountAOut = 0 ether;
+        uint256 amountBOut = 0 ether;
+
+        vm.startPrank(USER);
+
+        tokenA.transfer(address(dexerV2Pair), amountAIn);
+        tokenB.transfer(address(dexerV2Pair), amountBIn);
+
+        vm.expectRevert(DexerV2Pair.DexerV2Pair__InsufficientOutputAmount.selector);
+        dexerV2Pair.swap({amount0Out: amountAOut, amount1Out: amountBOut, to: USER});
+
+        vm.stopPrank();
+    }
+
+    function testSwapRevertsIfZeroInput() public withLiquidity {
+        uint256 amountAIn = 0 ether;
+        uint256 amountBIn = 0 ether;
+        uint256 amountAOut = 0 ether;
+        uint256 amountBOut = 1 ether;
+
+        vm.startPrank(USER);
+
+        tokenA.transfer(address(dexerV2Pair), amountAIn);
+        tokenB.transfer(address(dexerV2Pair), amountBIn);
+
+        vm.expectRevert(DexerV2Pair.DexerV2Pair__InsufficientInputAmount.selector);
+        dexerV2Pair.swap({amount0Out: amountAOut, amount1Out: amountBOut, to: USER});
+
+        vm.stopPrank();
     }
 }
