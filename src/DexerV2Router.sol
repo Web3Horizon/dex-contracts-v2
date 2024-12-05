@@ -21,6 +21,7 @@ contract DexerV2Router {
     error DexerV2Router__InsufficientBAmount();
     error DexerV2Router__TransferFailed();
     error DexerV2Router__LiquidityCalculationFail();
+    error DexerV2Router__InsufficientOutputAmount();
 
     constructor(address factoryAddress) {
         i_factory = IDexerV2Factory(factoryAddress);
@@ -113,6 +114,56 @@ contract DexerV2Router {
 
         if (amountA < amountAMin) revert DexerV2Router__InsufficientAAmount();
         if (amountB < amountBMin) revert DexerV2Router__InsufficientBAmount();
+    }
+
+    function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to)
+        external
+        returns (uint256[] memory amounts)
+    {
+        amounts = DexerV2Library.getAmountsOut(address(i_factory), amountIn, path);
+
+        // Check if the final amountOut is more than the minimum amount expected
+        if (amounts[amounts.length - 1] < amountOutMin) {
+            revert DexerV2Router__InsufficientOutputAmount();
+        }
+
+        // Transfer the input token from the user to the pair contract
+        IERC20(path[0]).safeTransferFrom(
+            msg.sender,
+            DexerV2Library.pairFor({factoryAddress: address(i_factory), tokenA: path[0], tokenB: path[1]}),
+            amountIn
+        );
+
+        _swap(amounts, path, to);
+    }
+
+    // PAIR SWAP: (uint256 amount0Out, uint256 amount1Out, address to) external {
+
+    function _swap(uint256[] memory amounts, address[] memory path, address _to) private {
+        for (uint256 i; i < path.length - 1; i++) {
+            // Define input and output tokens for the swap: Example tokenA -> tokenB -> tokenC
+            // First interation input: tokenA -> output:tokenB
+            // Second interation input: tokenB -> output: tokenC
+            (address inputToken, address outputToken) = (path[i], path[i + 1]);
+
+            // Sort tokens in each iteration (Needed for pair contract swap logic)
+            (address token0,) = DexerV2Library.sortTokens({tokenA: inputToken, tokenB: outputToken});
+
+            uint256 amountOut = amounts[i + 1];
+
+            (uint256 amount0Out, uint256 amount1Out) =
+                inputToken == token0 ? (uint256(0), amountOut) : (amountOut, uint256(0));
+
+            // Define if we are sending tokens to a contract OR to the user if its the last swap
+            address to = i < path.length - 2
+                ? DexerV2Library.pairFor({factoryAddress: address(i_factory), tokenA: outputToken, tokenB: path[i + 2]})
+                : _to;
+
+            // Call the swap function in the pair contract
+            IDexerV2Pair(
+                DexerV2Library.pairFor({factoryAddress: address(i_factory), tokenA: inputToken, tokenB: outputToken})
+            ).swap({amount0Out: amount0Out, amount1Out: amount1Out, to: to});
+        }
     }
 
     /*//////////////////////////////////////////////////////////////
