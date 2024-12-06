@@ -7,6 +7,7 @@ import {DexerV2Pair} from "src/DexerV2Pair.sol";
 library DexerV2Library {
     error DexerV2Library__InsufficientAmount();
     error DexerV2Library__InsufficientLiquidity();
+    error DexerV2Library__InvalidPath();
 
     /**
      * @notice Fetches the reserves of a token pair from the liquidity pool.
@@ -27,7 +28,7 @@ library DexerV2Library {
      * @return reserveB The reserve of `tokenB` in the liquidity pool.
      */
     function getReserves(address factoryAddress, address tokenA, address tokenB)
-        public
+        internal
         view
         returns (uint256 reserveA, uint256 reserveB)
     {
@@ -42,30 +43,125 @@ library DexerV2Library {
     }
 
     /**
-     * @notice Calculates the amount of output tokens based on the input token amount
-     *         and the reserves of the input and output tokens in a liquidity pool.
+     * @notice This function is called for managing liquidity only, not swaps.
+     *
+     * @notice Calculates the optimal amount of the second token to add to a liquidity pool
+     *         to maintain balance, given the amount of the first token being added and the
+     *         reserves of both tokens in the pool.
      *
      * @dev This function is a pure utility that uses the formula:
      *      `amountOut = (amountIn * reserveOut) / reserveIn`.
      *      It reverts if the input amount is zero or if either of the reserves is zero.
      *
-     * @param amountIn The amount of input tokens being provided.
-     * @param reserveIn The reserve amount of the input token in the liquidity pool.
-     * @param reserveOut The reserve amount of the output token in the liquidity pool.
+     * @param amountIn The amount of the first token being added to the liquidity pool.
+     * @param reserveIn The current reserve of the first token in the liquidity pool.
+     * @param reserveOut The current reserve of the second token in the liquidity pool.
      *
-     * @return amountOut The calculated amount of output tokens based on the given reserves.
+     * @return amountOtherTokenToAdd The calculated optimal amount of the second token to add to the pool.
      *
      * @notice Reverts with `DexerV2Library__InsufficientAmount` if `amountIn` is zero.
      *         Reverts with `DexerV2Library__InsufficientLiquidity` if either `reserveIn` or `reserveOut` is zero.
      */
-    function quote(uint256 amountIn, uint256 reserveIn, uint256 reserveOut) public pure returns (uint256 amountOut) {
+    function quote(uint256 amountIn, uint256 reserveIn, uint256 reserveOut)
+        internal
+        pure
+        returns (uint256 amountOtherTokenToAdd)
+    {
         // If no amountIn is provided, we cant calculate the amountOut
         if (amountIn == 0) revert DexerV2Library__InsufficientAmount();
 
         // If there are no reserves, revert
         if (reserveIn == 0 || reserveOut == 0) revert DexerV2Library__InsufficientLiquidity();
 
-        return (amountIn * reserveOut) / reserveIn;
+        uint256 numerator = amountIn * reserveOut;
+
+        uint256 denominator = reserveIn;
+
+        amountOtherTokenToAdd = numerator / denominator;
+
+        return amountOtherTokenToAdd;
+    }
+
+    /**
+     * @notice Calculates the amount of output tokens based on the input token amount
+     *         and the reserves of both of the tokens in a liquidity pool.
+     *
+     * @dev This function is a pure utility that uses the formula:
+     *      `amountOut = (amountInWithFee * reserveOut) / reserveIn + amountInWithFee`.
+     *      It reverts if the input amount is zero or if either of the reserves is zero.
+     *
+     * @param amountIn The amount of input tokens being provided.
+     * @param reserveIn The reserve amount of the input token in the liquidity pool.
+     * @param reserveOut The reserve amount of the output token in the liquidity pool.
+     *
+     * @return amountOut The calculated amount of output tokens based on the given reserves and `amountIn`.
+     *
+     * @notice Reverts with `DexerV2Library__InsufficientAmount` if `amountIn` is zero.
+     *         Reverts with `DexerV2Library__InsufficientLiquidity` if either `reserveIn` or `reserveOut` is zero.
+     */
+    function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut)
+        internal
+        pure
+        returns (uint256 amountOut)
+    {
+        // If no amountIn is provided, we cant calculate the amountOut
+        if (amountIn == 0) revert DexerV2Library__InsufficientAmount();
+
+        // If there are no reserves, revert
+        if (reserveIn == 0 || reserveOut == 0) revert DexerV2Library__InsufficientLiquidity();
+
+        // No decimals in solidity so we multiply by 997 then divide by 1000 to get the 0.3% fee
+        uint256 amountInWithFee = amountIn * 997;
+        uint256 numerator = amountInWithFee * reserveOut;
+        uint256 denominator = (reserveIn * 1000) + amountInWithFee;
+
+        amountOut = numerator / denominator;
+        return amountOut;
+    }
+
+    /**
+     * @notice This function performs a chain call of `getAmountOut` for pairs in the `path`.
+     *
+     * @dev This function performs a chain call of `getAmountOut` for pairs in the `path`.
+     *         It populates the first element of the return array with `amountIn`,
+     *         and the last element is the amount of output tokens of the last swap, the desired output token.
+     *
+     * @param factoryAddress The address of the factory contract.
+     * @param amountIn The amount of tokens to the user wants wants to swap path[0].
+     * @param path An array of token addresses indicating the path to take for swaps.
+     *           path[0] is the token sent from the user.
+     *           path[length - 1] is the end token for the user to receive.
+     *
+     * @return amountsOut An array of calculated amount of output tokens for each given pair of tokens in the `path`.
+     *
+     * @custom:reverts DexerV2Library__InvalidPath if the `path` does not contain at least two addresses.
+     *
+     */
+    function getAmountsOut(address factoryAddress, uint256 amountIn, address[] memory path)
+        internal
+        view
+        returns (uint256[] memory amountsOut)
+    {
+        // Path length should be more than two
+        if (path.length < 2) revert DexerV2Library__InvalidPath();
+
+        // Initiate a new array to store amountOut for each swap
+        amountsOut = new uint256[](path.length);
+
+        // Set the first element as the amountIn defined by the user
+        amountsOut[0] = amountIn;
+
+        // Iterate through the whole path array and get the amountOut for each swap
+        for (uint256 i; i < path.length - 1; i++) {
+            // Get the reserves of the current two tokens in the iteration
+            (uint256 reserveIn, uint256 reserveOut) =
+                getReserves({factoryAddress: factoryAddress, tokenA: path[i], tokenB: path[i + 1]});
+
+            // Set the amountOut for the current token pair in the itaration
+            amountsOut[i + 1] = getAmountOut({amountIn: amountsOut[i], reserveIn: reserveIn, reserveOut: reserveOut});
+        }
+
+        return amountsOut;
     }
 
     /**
