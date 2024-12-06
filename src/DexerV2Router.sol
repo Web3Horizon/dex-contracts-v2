@@ -212,7 +212,7 @@ contract DexerV2Router {
 
         if (amountBOptimal <= amountBDesired) {
             // If the optimal amount is less than the minimum amount revert.
-            if (amountBOptimal <= amountBMin) revert DexerV2Router__InsufficientBAmount();
+            if (amountBOptimal < amountBMin) revert DexerV2Router__InsufficientBAmount();
 
             // Return the values
             return (amountADesired, amountBOptimal);
@@ -223,7 +223,7 @@ contract DexerV2Router {
         uint256 amountAOptimal = DexerV2Library.quote(amountBDesired, reserveA, reserveB);
 
         if (amountAOptimal <= amountADesired) {
-            if (amountAOptimal <= amountAMin) revert DexerV2Router__InsufficientAAmount();
+            if (amountAOptimal < amountAMin) revert DexerV2Router__InsufficientAAmount();
 
             // Return the values
             return (amountAOptimal, amountBDesired);
