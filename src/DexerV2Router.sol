@@ -231,4 +231,28 @@ contract DexerV2Router {
 
         revert DexerV2Router__LiquidityCalculationFail();
     }
+
+    /*//////////////////////////////////////////////////////////////
+                              Library functions
+    //////////////////////////////////////////////////////////////*/
+
+    function quote(uint256 amountIn, uint256 reserveIn, uint256 reserveOut)
+        public
+        pure
+        returns (uint256 amountOtherTokenToAdd)
+    {
+        return DexerV2Library.quote({amountIn: amountIn, reserveIn: reserveIn, reserveOut: reserveOut});
+    }
+
+    function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut)
+        public
+        pure
+        returns (uint256 amountOut)
+    {
+        return DexerV2Library.getAmountOut({amountIn: amountIn, reserveIn: reserveIn, reserveOut: reserveOut});
+    }
+
+    function getAmountsOut(uint256 amountIn, address[] memory path) public view returns (uint256[] memory amountsOut) {
+        return DexerV2Library.getAmountsOut({factoryAddress: address(i_factory), amountIn: amountIn, path: path});
+    }
 }
