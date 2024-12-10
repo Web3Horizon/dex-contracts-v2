@@ -67,7 +67,8 @@ contract DexerV2Router {
         (amountA, amountB) = _calculateLiquidity(tokenA, tokenB, amountADesired, amountBDesired, amountAMin, amountBMin);
 
         // Get the pair address without an external conctract call.
-        address pairAddress = DexerV2Library.pairFor(address(i_factory), tokenA, tokenB);
+        address pairAddress =
+            DexerV2Library.pairFor({factoryAddress: address(i_factory), tokenA: tokenA, tokenB: tokenB});
 
         // Transfer the tokens from the user to the pair contract.
         IERC20(tokenA).safeTransferFrom(msg.sender, pairAddress, amountA);
@@ -120,7 +121,7 @@ contract DexerV2Router {
         external
         returns (uint256[] memory amounts)
     {
-        amounts = DexerV2Library.getAmountsOut(address(i_factory), amountIn, path);
+        amounts = DexerV2Library.getAmountsOut({factoryAddress: address(i_factory), amountIn: amountIn, path: path});
 
         // Check if the final amountOut is more than the minimum amount expected
         if (amounts[amounts.length - 1] < amountOutMin) {
@@ -199,7 +200,8 @@ contract DexerV2Router {
         uint256 amountBMin
     ) private view returns (uint256 amountA, uint256 amountB) {
         // Get reserves
-        (uint256 reserveA, uint256 reserveB) = DexerV2Library.getReserves(address(i_factory), tokenA, tokenB);
+        (uint256 reserveA, uint256 reserveB) =
+            DexerV2Library.getReserves({factoryAddress: address(i_factory), tokenA: tokenA, tokenB: tokenB});
 
         // Case 1:  If there are no reserves, we can add any ratio the user wants.
         if (reserveA == 0 && reserveB == 0) {
@@ -208,7 +210,8 @@ contract DexerV2Router {
 
         // Case 2: Calculate optimal tokenB amount for the desired tokenA amount
         // Calculate the optimal amount of token B with the given amountA desired.
-        uint256 amountBOptimal = DexerV2Library.quote(amountADesired, reserveA, reserveB);
+        uint256 amountBOptimal =
+            DexerV2Library.quote({amountIn: amountADesired, reserveIn: reserveA, reserveOut: reserveB});
 
         if (amountBOptimal <= amountBDesired) {
             // If the optimal amount is less than the minimum amount revert.
@@ -220,7 +223,8 @@ contract DexerV2Router {
 
         // Case 3: Calculate optimal tokenA amount for the desired tokenB amount
         // If we cant find suitable values in terms of tokenA, check for values in terms of tokenB (find optimal amount of tokenA for given tokenB)
-        uint256 amountAOptimal = DexerV2Library.quote(amountBDesired, reserveA, reserveB);
+        uint256 amountAOptimal =
+            DexerV2Library.quote({amountIn: amountBDesired, reserveIn: reserveB, reserveOut: reserveA});
 
         if (amountAOptimal <= amountADesired) {
             if (amountAOptimal < amountAMin) revert DexerV2Router__InsufficientAAmount();
