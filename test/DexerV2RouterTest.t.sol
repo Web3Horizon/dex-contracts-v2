@@ -1,4 +1,4 @@
-// // SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
 import {Test, console} from "forge-std/Test.sol";
@@ -109,22 +109,21 @@ contract DexerV2RouterTest is Test {
     }
 
     modifier withAllowance() {
-        uint256 tokenAAllowance = type(uint256).max;
-        uint256 tokenBAllowanceb = type(uint256).max;
-
         // Allowance for LIQUIDITY_USER
         vm.startPrank(LIQUIDITY_USER);
 
-        tokenA.approve(address(dexerV2Router), tokenAAllowance);
-        tokenB.approve(address(dexerV2Router), tokenBAllowanceb);
+        tokenA.approve(address(dexerV2Router), type(uint256).max);
+        tokenB.approve(address(dexerV2Router), type(uint256).max);
+        tokenC.approve(address(dexerV2Router), type(uint256).max);
 
         vm.stopPrank();
 
         // Allowance for USER
         vm.startPrank(USER);
 
-        tokenA.approve(address(dexerV2Router), tokenAAllowance);
-        tokenB.approve(address(dexerV2Router), tokenBAllowanceb);
+        tokenA.approve(address(dexerV2Router), type(uint256).max);
+        tokenB.approve(address(dexerV2Router), type(uint256).max);
+        tokenC.approve(address(dexerV2Router), type(uint256).max);
 
         vm.stopPrank();
 
@@ -327,6 +326,7 @@ contract DexerV2RouterTest is Test {
 
         assertEq(toLPAfter, toLPBefore + lp, "Incorrect `to` LP token balance after adding liquidity");
     }
+
     /* ******** Reverts ******** */
 
     function testAddLiquidityRevertsIfZeroAmountADesired() public withLiquidity withAllowance {
@@ -442,6 +442,208 @@ contract DexerV2RouterTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////
-                              removeLiquidity
+                              REMOVE LIQUIDITY
     //////////////////////////////////////////////////////////////*/
+
+    /*//////////////////////////////////////////////////////////////
+                              SWAP
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Test basic swap A -> B
+    function testSwapExactTokensForTokens() public withLiquidity withAllowance {
+        uint256 amountIn = 0.1 ether;
+        uint256 amountOutMin = 0.9 ether;
+        dexerV2Pair = DexerV2Pair(dexerV2Factory.pairs(address(tokenA), address(tokenB)));
+
+        address[] memory path = new address[](2);
+        path[0] = address(tokenA);
+        path[1] = address(tokenB);
+
+        // Get USER balances before swap
+        uint256 userTokenABefore = tokenA.balanceOf(USER);
+        uint256 userTokenBBefore = tokenB.balanceOf(USER);
+
+        // Get reserves before swap
+        (uint256 reserveABefore, uint256 reserveBBefore) = dexerV2Pair.getReserves();
+
+        vm.startPrank(USER);
+
+        // Swap to = USER
+        uint256[] memory amounts = dexerV2Router.swapExactTokensForTokens({
+            amountIn: amountIn,
+            amountOutMin: amountOutMin,
+            path: path,
+            to: USER
+        });
+
+        vm.stopPrank();
+
+        // Get USER balances after swap
+        uint256 userTokenAAfter = tokenA.balanceOf(USER);
+        uint256 userTokenBAfter = tokenB.balanceOf(USER);
+
+        // Get reserves after swap
+        (uint256 reserveAAfter, uint256 reserveBAfter) = dexerV2Pair.getReserves();
+
+        // expected amountOut
+        uint256 expectedAmountOut =
+            dexerV2Router.getAmountOut({amountIn: amountIn, reserveIn: reserveABefore, reserveOut: reserveBBefore});
+
+        // Assert output of tokenB
+        assertEq(amounts[amounts.length - 1], expectedAmountOut, "Unexpected amount out");
+
+        // Assert input of tokenA
+        assertEq(amounts[0], amountIn, "Unexpected amount in");
+
+        // Check that user spent `amountIn` of tokenA
+        assertEq(userTokenAAfter, userTokenABefore - amountIn, "Incorrect tokenA balance after swap");
+
+        // Assert the user received tokenB
+        assertEq(userTokenBAfter, userTokenBBefore + amounts[amounts.length - 1], "Incorrect tokenB balance afer swap");
+
+        // Assert reserves after
+
+        assertEq(reserveAAfter, reserveABefore + amountIn, "Unexpected reserveA after swap");
+        assertEq(reserveBAfter, reserveBBefore - amounts[amounts.length - 1], "Unexpected reserveA after swap");
+    }
+
+    /* ******** Reverts ******** */
+
+    /// @notice Tests that swapExactTokensForTokens reverts if input is zero.
+    function testSwapExactTokensForTokensRevertsIfAmountInIsZero() public withLiquidity withAllowance {
+        uint256 amountIn = 0 ether;
+        uint256 amountOutMin = 0 ether; // no expectations
+        dexerV2Pair = DexerV2Pair(dexerV2Factory.pairs(address(tokenA), address(tokenB)));
+
+        address[] memory path = new address[](2);
+        path[0] = address(tokenA);
+        path[1] = address(tokenB);
+
+        vm.startPrank(USER);
+
+        vm.expectRevert(DexerV2Library.DexerV2Library__InsufficientAmount.selector);
+
+        uint256[] memory amounts = dexerV2Router.swapExactTokensForTokens({
+            amountIn: amountIn,
+            amountOutMin: amountOutMin,
+            path: path,
+            to: USER
+        });
+
+        vm.stopPrank();
+    }
+
+    /// @notice Tests that swapExactTokensForTokens reverts if the amountOutMin is not met
+    function testSwapExactTokensForTokensRevertsIfAmountOutMinNotMet() public withLiquidity withAllowance {
+        uint256 amountIn = 0.1 ether;
+        uint256 amountOutMin = 50 ether; // very high
+        dexerV2Pair = DexerV2Pair(dexerV2Factory.pairs(address(tokenA), address(tokenB)));
+
+        address[] memory path = new address[](2);
+        path[0] = address(tokenA);
+        path[1] = address(tokenB);
+
+        vm.startPrank(USER);
+
+        vm.expectRevert(DexerV2Router.DexerV2Router__InsufficientOutputAmount.selector);
+
+        dexerV2Router.swapExactTokensForTokens({amountIn: amountIn, amountOutMin: amountOutMin, path: path, to: USER});
+
+        vm.stopPrank();
+    }
+
+    /// @notice Tests that swapExactTokensForTokens reverts if the pair has no liquidity
+    function testSwapExactTokensForTokensRevertsIfNoLiquidity() public withAllowance {
+        address pairAddress = dexerV2Factory.createPair({tokenA: address(tokenA), tokenB: address(tokenB)});
+        uint256 amountIn = 0.1 ether;
+        uint256 amountOutMin = 1 ether;
+
+        dexerV2Pair = DexerV2Pair(pairAddress);
+
+        address[] memory path = new address[](2);
+        path[0] = address(tokenA);
+        path[1] = address(tokenB);
+
+        vm.startPrank(USER);
+
+        vm.expectRevert(DexerV2Library.DexerV2Library__InsufficientLiquidity.selector);
+
+        uint256[] memory amounts = dexerV2Router.swapExactTokensForTokens({
+            amountIn: amountIn,
+            amountOutMin: amountOutMin,
+            path: path,
+            to: USER
+        });
+
+        vm.stopPrank();
+    }
+
+    /// @notice Tests that swapExactTokensForTokens reverts if the path is not valid (Need >= 2 token addresses)
+    function testSwapExactTokensForTokensRevertsIfInvalidPath() public withLiquidity withAllowance {
+        uint256 amountIn = 0.1 ether;
+        uint256 amountOutMin = 1 ether;
+        dexerV2Pair = DexerV2Pair(dexerV2Factory.pairs(address(tokenA), address(tokenB)));
+
+        address[] memory path = new address[](1); // Dont set second path
+        path[0] = address(tokenA);
+
+        vm.startPrank(USER);
+
+        vm.expectRevert(DexerV2Library.DexerV2Library__InvalidPath.selector);
+
+        dexerV2Router.swapExactTokensForTokens({amountIn: amountIn, amountOutMin: amountOutMin, path: path, to: USER});
+
+        vm.stopPrank();
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                              SWAP MULTI-HOP
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Test multihop swap including two or more pair pools, example: A->B->C; available pools: AB and BC
+    function testSwapExactTokensForTokensMultiHop() public withLiquidity withAllowance {
+        // Add liquidity for tokenB - tokenC pair as well to simulate a multi-hop environment
+        vm.startPrank(LIQUIDITY_USER);
+        dexerV2Router.addLiquidity({
+            tokenA: address(tokenB),
+            tokenB: address(tokenC),
+            amountADesired: 1 ether,
+            amountBDesired: 20 ether,
+            amountAMin: 1 ether,
+            amountBMin: 20 ether,
+            to: LIQUIDITY_USER
+        });
+        vm.stopPrank();
+
+        uint256 amountIn = 1 ether;
+        uint256 amountOutMin = 10 ether;
+        dexerV2Pair = DexerV2Pair(dexerV2Factory.pairs(address(tokenA), address(tokenB)));
+
+        // Path A->B->C
+        address[] memory path = new address[](3);
+        path[0] = address(tokenA);
+        path[1] = address(tokenB);
+        path[2] = address(tokenC);
+
+        // Get USER balances before swap
+        uint256 userTokenABefore = tokenA.balanceOf(USER);
+        uint256 userTokenBCefore = tokenC.balanceOf(USER);
+
+        vm.startPrank(USER);
+
+        // Swap to = USER
+        dexerV2Router.swapExactTokensForTokens({amountIn: amountIn, amountOutMin: amountOutMin, path: path, to: USER});
+
+        vm.stopPrank();
+
+        // Get USER balances after swap
+        uint256 userTokenAAfter = tokenA.balanceOf(USER);
+        uint256 userTokenCAfter = tokenC.balanceOf(USER);
+
+        // Check that user spent `amountIn` of tokenA
+        assertEq(userTokenAAfter, userTokenABefore - amountIn, "Incorrect tokenA balance after swap");
+
+        // Assert the user received tokenC (We are avoiding calculation here, so calculate at least amountOutMin)
+        assertGt(userTokenCAfter, userTokenBCefore + amountOutMin, "User should have received tokenC");
+    }
 }
