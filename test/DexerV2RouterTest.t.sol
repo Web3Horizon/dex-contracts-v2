@@ -445,6 +445,228 @@ contract DexerV2RouterTest is Test {
                               REMOVE LIQUIDITY
     //////////////////////////////////////////////////////////////*/
 
+    /// @notice Test liquidiy removal and token transfers
+    function testRemoveLiquidity() public withLiquidity {
+        uint256 lpToRemove;
+        uint256 amountAMin = 0.4 ether;
+        uint256 amountBMin = 4.5 ether;
+
+        // Get pair address
+        dexerV2Pair = DexerV2Pair(dexerV2Factory.pairs(address(tokenA), address(tokenB)));
+
+        // Get reserves before tx
+        (uint256 reserveABefore, uint256 reserveBBefore) = dexerV2Pair.getReserves();
+
+        // Get USER balances before tx
+        uint256 userTokenABefore = tokenA.balanceOf(LIQUIDITY_USER);
+        uint256 userTokenBBefore = tokenB.balanceOf(LIQUIDITY_USER);
+        uint256 userLPBefore = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+
+        lpToRemove = userLPBefore / 2; // remove 50%
+
+        vm.startPrank(LIQUIDITY_USER);
+
+        // Allowance
+        dexerV2Pair.approve(address(dexerV2Router), type(uint256).max);
+
+        (uint256 amountA, uint256 amountB) = dexerV2Router.removeLiquidity({
+            tokenA: address(tokenA),
+            tokenB: address(tokenB),
+            amountLPToken: lpToRemove,
+            amountAMin: amountAMin,
+            amountBMin: amountBMin,
+            to: LIQUIDITY_USER
+        });
+
+        vm.stopPrank();
+
+        // Scope to prevent stack too deep
+        {
+            // Get USER balances after tx
+            uint256 userTokenAAfter = tokenA.balanceOf(LIQUIDITY_USER);
+            uint256 userTokenBAfter = tokenB.balanceOf(LIQUIDITY_USER);
+            uint256 userLPAfter = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+
+            // Assert amountMins are respected
+            assertGe(amountA, amountAMin, "Unexpected amountA returned from removing liquidity");
+            assertGe(amountB, amountBMin, "Unexpected amountB returned from removing liquidity");
+
+            // Assert LP was transfered from user
+            assertEq(userLPAfter, userLPBefore - lpToRemove, "Unexpected user LP token balance afer removing liquidity");
+
+            // Assert user received tokenA and tokenB back
+            assertLt(userTokenABefore, userTokenAAfter, "User should have received tokenA after removing liquidity");
+            assertLt(userTokenBBefore, userTokenBAfter, "User should have received tokenA after removing liquidity");
+
+            // Assert reserves
+            _assertReserves({expectedReserve0: reserveABefore - amountA, expectedReserve1: reserveBBefore - amountB});
+        }
+    }
+
+    /// @notice Test liquidiy removal and token transfers when removing all the available liquidity
+    function testRemoveLiquidityAllLiquidity() public withLiquidity {
+        uint256 lpToRemove;
+        uint256 amountAMin = 1 ether;
+        uint256 amountBMin = 10 ether;
+
+        // Get pair address
+        dexerV2Pair = DexerV2Pair(dexerV2Factory.pairs(address(tokenA), address(tokenB)));
+
+        // Get reserves before tx
+        (uint256 reserveABefore, uint256 reserveBBefore) = dexerV2Pair.getReserves();
+
+        // Get USER balances before tx
+        uint256 userTokenABefore = tokenA.balanceOf(LIQUIDITY_USER);
+        uint256 userTokenBBefore = tokenB.balanceOf(LIQUIDITY_USER);
+        uint256 userLPBefore = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+
+        lpToRemove = userLPBefore; // All balance
+
+        vm.startPrank(LIQUIDITY_USER);
+
+        // Allowance
+        dexerV2Pair.approve(address(dexerV2Router), type(uint256).max);
+
+        (uint256 amountA, uint256 amountB) = dexerV2Router.removeLiquidity({
+            tokenA: address(tokenA),
+            tokenB: address(tokenB),
+            amountLPToken: lpToRemove,
+            amountAMin: amountAMin,
+            amountBMin: amountBMin,
+            to: LIQUIDITY_USER
+        });
+
+        vm.stopPrank();
+
+        // Scope to prevent stack too deep
+        {
+            // Get USER balances after tx
+            uint256 userTokenAAfter = tokenA.balanceOf(LIQUIDITY_USER);
+            uint256 userTokenBAfter = tokenB.balanceOf(LIQUIDITY_USER);
+            uint256 userLPAfter = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+
+            // Assert amountMins are respected
+            assertGe(amountA, amountAMin, "Unexpected amountA returned from removing liquidity");
+            assertGe(amountB, amountBMin, "Unexpected amountB returned from removing liquidity");
+
+            // Assert LP was transfered from user
+            assertEq(userLPAfter, 0, "Unexpected user LP token balance afer removing liquidity");
+
+            // Assert user received tokenA and tokenB back
+            assertEq(
+                userTokenABefore + amountAMin,
+                userTokenAAfter,
+                "User should have received tokenA after removing liquidity"
+            );
+            assertEq(
+                userTokenBBefore + amountBMin,
+                userTokenBAfter,
+                "User should have received tokenA after removing liquidity"
+            );
+
+            // Assert reserves are depleted
+            _assertReserves({expectedReserve0: 0, expectedReserve1: 0});
+        }
+    }
+
+    /* ******** Reverts ******** */
+
+    /// @notice Test liquidity removal reverts if the amount of tokenA returned is less than the amountAMin
+    function testRemoveLiquidityRevertsIfAmountAMinNotMet() public withLiquidity withAllowance {
+        uint256 lpToRemove;
+        uint256 amountAMin = 0.9 ether; // Too much
+        uint256 amountBMin = 4.5 ether;
+
+        // Get pair address
+        dexerV2Pair = DexerV2Pair(dexerV2Factory.pairs(address(tokenA), address(tokenB)));
+
+        uint256 userLPBefore = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+
+        lpToRemove = userLPBefore / 2; // remove 50%
+
+        vm.startPrank(LIQUIDITY_USER);
+
+        // Allowance
+        dexerV2Pair.approve(address(dexerV2Router), type(uint256).max);
+
+        vm.expectRevert(DexerV2Router.DexerV2Router__InsufficientAAmount.selector);
+
+        dexerV2Router.removeLiquidity({
+            tokenA: address(tokenA),
+            tokenB: address(tokenB),
+            amountLPToken: lpToRemove,
+            amountAMin: amountAMin,
+            amountBMin: amountBMin,
+            to: LIQUIDITY_USER
+        });
+
+        vm.stopPrank();
+    }
+
+    /// @notice Test liquidity removal reverts if the amount of tokenB returned is less than the amountBMin
+    function testRemoveLiquidityRevertsIfAmountBMinNotMet() public withLiquidity withAllowance {
+        uint256 lpToRemove;
+        uint256 amountAMin = 0.4 ether;
+        uint256 amountBMin = 5 ether; // Too much
+
+        // Get pair address
+        dexerV2Pair = DexerV2Pair(dexerV2Factory.pairs(address(tokenA), address(tokenB)));
+
+        uint256 userLPBefore = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+
+        lpToRemove = userLPBefore / 2; // remove 50%
+
+        vm.startPrank(LIQUIDITY_USER);
+
+        // Allowance
+        dexerV2Pair.approve(address(dexerV2Router), type(uint256).max);
+
+        vm.expectRevert(DexerV2Router.DexerV2Router__InsufficientBAmount.selector);
+
+        dexerV2Router.removeLiquidity({
+            tokenA: address(tokenA),
+            tokenB: address(tokenB),
+            amountLPToken: lpToRemove,
+            amountAMin: amountAMin,
+            amountBMin: amountBMin,
+            to: LIQUIDITY_USER
+        });
+
+        vm.stopPrank();
+    }
+
+    /// @notice Test remove liquidity reverts if the input of LP tokens to burn is more than the users balance
+    function testRemoveLiquidityRevertsIfAmountInExceedsBalance() public withLiquidity withAllowance {
+        uint256 lpToRemove;
+        uint256 amountAMin = 0.4 ether;
+        uint256 amountBMin = 5 ether; // Too much
+
+        // Get pair address
+        dexerV2Pair = DexerV2Pair(dexerV2Factory.pairs(address(tokenA), address(tokenB)));
+
+        uint256 userLPBefore = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+
+        lpToRemove = userLPBefore + 1;
+
+        vm.startPrank(LIQUIDITY_USER);
+
+        // Allowance
+        dexerV2Pair.approve(address(dexerV2Router), type(uint256).max);
+
+        vm.expectRevert();
+
+        dexerV2Router.removeLiquidity({
+            tokenA: address(tokenA),
+            tokenB: address(tokenB),
+            amountLPToken: lpToRemove,
+            amountAMin: amountAMin,
+            amountBMin: amountBMin,
+            to: LIQUIDITY_USER
+        });
+
+        vm.stopPrank();
+    }
+
     /*//////////////////////////////////////////////////////////////
                               SWAP
     //////////////////////////////////////////////////////////////*/
