@@ -120,6 +120,86 @@ library DexerV2Library {
     }
 
     /**
+     * @notice Calculates the amount of input tokens required to obtain a specific output token amount
+     *         based on the reserves of both tokens in a liquidity pool.
+     *
+     * @dev This function is a pure utility that uses the formula:
+     *      `amountIn = (amountOut * reserveIn * 1000) / ((reserveOut * 997) - amountOut)`.
+     *      It reverts if the output amount is zero or if either of the reserves is zero.
+     *
+     * @param amountOut The desired amount of output tokens.
+     * @param reserveIn The reserve amount of the input token in the liquidity pool.
+     * @param reserveOut The reserve amount of the output token in the liquidity pool.
+     *
+     * @return amountIn The calculated amount of input tokens required to obtain the given `amountOut`.
+     *
+     * @notice Reverts with `DexerV2Library__InsufficientAmount` if `amountOut` is zero.
+     *         Reverts with `DexerV2Library__InsufficientLiquidity` if either `reserveIn` or `reserveOut` is zero.
+     */
+    function getAmountIn(uint256 amountOut, uint256 reserveIn, uint256 reserveOut)
+        internal
+        pure
+        returns (uint256 amountIn)
+    {
+        // If no amountOut is provided, we cant calculate the amountIn
+        if (amountOut == 0) revert DexerV2Library__InsufficientAmount();
+
+        // If there are no reserves, revert
+        if (reserveIn == 0 || reserveOut == 0) revert DexerV2Library__InsufficientLiquidity();
+
+        uint256 numerator = amountOut * (reserveIn * 1000);
+        uint256 denominator = (reserveOut * 997) - amountOut;
+
+        amountIn = numerator / denominator;
+        return amountIn;
+    }
+
+    /**
+     * @notice This function performs a chain call of `getAmountIn` for pairs in the `path`.
+     *
+     * @dev This function performs a chain call of `getAmountIn` for pairs in the `path`.
+     *         It populates the last element of the return array with `amountOut`,
+     *         and the first element is the amount of input tokens of the first swap, the required input token.
+     *
+     * @param factoryAddress The address of the factory contract.
+     * @param amountOut The desired amount of output tokens for the user to receive (`path[length - 1]`).
+     * @param path An array of token addresses indicating the path to take for swaps.
+     *           path[0] is the input token provided by the user.
+     *           path[length - 1] is the token to be received by the user.
+     *
+     * @return amountsIn An array of calculated amounts of input tokens required for each given pair of tokens in the `path`.
+     *
+     * @custom:reverts DexerV2Library__InvalidPath if the `path` does not contain at least two addresses.
+     *
+     */
+    function getAmountsIn(address factoryAddress, uint256 amountOut, address[] memory path)
+        internal
+        view
+        returns (uint256[] memory amountsIn)
+    {
+        // Path length should be more than two
+        if (path.length < 2) revert DexerV2Library__InvalidPath();
+
+        // Initiate a new array to store amountIn for each swap
+        amountsIn = new uint256[](path.length);
+
+        // Set the last element as the amountOut
+        amountsIn[amountsIn.length - 1] = amountOut;
+
+        // Iterate through the whole path array and get the amountOut for each swap
+        for (uint256 i = path.length - 1; i > 0; i--) {
+            // Get the reserves of the current two tokens in the iteration
+            (uint256 reserveIn, uint256 reserveOut) =
+                getReserves({factoryAddress: factoryAddress, tokenA: path[i - 1], tokenB: path[1]});
+
+            // Set the amountOut for the current token pair in the itaration
+            amountsIn[i - 1] = getAmountIn({amountOut: amountsIn[i], reserveIn: reserveIn, reserveOut: reserveOut});
+        }
+
+        return amountsIn;
+    }
+
+    /**
      * @notice This function performs a chain call of `getAmountOut` for pairs in the `path`.
      *
      * @dev This function performs a chain call of `getAmountOut` for pairs in the `path`.

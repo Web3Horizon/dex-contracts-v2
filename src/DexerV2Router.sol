@@ -259,4 +259,16 @@ contract DexerV2Router {
     function getAmountsOut(uint256 amountIn, address[] memory path) public view returns (uint256[] memory amountsOut) {
         return DexerV2Library.getAmountsOut({factoryAddress: address(i_factory), amountIn: amountIn, path: path});
     }
+
+    function getAmountIn(uint256 amountOut, uint256 reserveIn, uint256 reserveOut)
+        public
+        pure
+        returns (uint256 amountIn)
+    {
+        return DexerV2Library.getAmountIn({amountOut: amountOut, reserveIn: reserveIn, reserveOut: reserveOut});
+    }
+
+    function getAmountsIn(uint256 amountOut, address[] memory path) public view returns (uint256[] memory amountsIn) {
+        return DexerV2Library.getAmountsIn({factoryAddress: address(i_factory), amountOut: amountOut, path: path});
+    }
 }
