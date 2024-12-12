@@ -3,7 +3,6 @@ pragma solidity ^0.8.19;
 
 import {Test, console} from "forge-std/Test.sol";
 import {DexerV2Pair} from "src/DexerV2Pair.sol";
-import {DexerV2Factory} from "src/DexerV2Factory.sol";
 import {MockERC20} from "src/mocks/MockERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
@@ -13,46 +12,40 @@ contract DexerV2PairTest is Test {
     uint256 STARTING_BALANCE = 100 ether;
     address USER;
     address LIQUIDITY_USER;
+    address FACTORY;
     DexerV2Pair dexerV2Pair;
-    DexerV2Factory dexerV2Factory;
 
     function setUp() external {
+        // Users and factory
         USER = makeAddr("user");
         LIQUIDITY_USER = makeAddr("user2");
+        FACTORY = makeAddr("factory");
 
         // Mock tokens
-
         MockERC20 token0 = new MockERC20("Token0", "TKN0");
         MockERC20 token1 = new MockERC20("Token1", "TKN1");
 
+        // Sort mock tokens and rename (tokenA < tokenB)
         (tokenA, tokenB) = address(token0) < address(token1) ? (token0, token1) : (token1, token0);
 
-        // tokenA = new MockERC20("Token A", "TKNA");
-        // tokenB = new MockERC20("Token B", "TKNB");
-
-        // Pair and factory contracts
-        dexerV2Factory = new DexerV2Factory();
-        // dexerV2Pair = new DexerV2Pair();
-
-        address pair = dexerV2Factory.createPair(address(tokenA), address(tokenB));
-
-        dexerV2Pair = DexerV2Pair(pair);
-
-        // dexerV2Pair.initialize(address(tokenA), address(tokenB));
-
+        // Deal and mint tokens
         vm.deal(USER, STARTING_BALANCE);
         vm.deal(LIQUIDITY_USER, STARTING_BALANCE);
+        tokenA.mint(USER, STARTING_BALANCE);
+        tokenB.mint(USER, STARTING_BALANCE);
+        tokenA.mint(LIQUIDITY_USER, STARTING_BALANCE);
+        tokenB.mint(LIQUIDITY_USER, STARTING_BALANCE);
 
-        tokenA.mint(USER, 100 ether);
-        tokenB.mint(USER, 100 ether);
-        tokenA.mint(LIQUIDITY_USER, 100 ether);
-        tokenB.mint(LIQUIDITY_USER, 100 ether);
+        // Deploy pair as if done by the factory
+        vm.startPrank(FACTORY);
+        dexerV2Pair = new DexerV2Pair();
+        vm.stopPrank();
     }
 
     /*//////////////////////////////////////////////////////////////
                               Helpers
     //////////////////////////////////////////////////////////////*/
-    function assertReserves(uint256 expectedReserve0, uint256 expectedReserve1) internal view {
+    function _assertReserves(uint256 expectedReserve0, uint256 expectedReserve1) internal view {
         (uint256 reserve0, uint256 reserve1) = dexerV2Pair.getReserves();
         assertApproxEqRel(reserve0, expectedReserve0, 1e15, "Unexpected reserve0"); // 1e15 = 0.1%
         assertApproxEqRel(reserve1, expectedReserve1, 1e15, "Unexpected reserve1");
@@ -61,6 +54,16 @@ contract DexerV2PairTest is Test {
     /*//////////////////////////////////////////////////////////////
                               MODIFIER
     //////////////////////////////////////////////////////////////*/
+
+    modifier initialized() {
+        vm.startPrank(FACTORY);
+
+        dexerV2Pair.initialize({_token0: address(tokenA), _token1: address(tokenB)});
+
+        vm.stopPrank();
+        _;
+    }
+
     modifier withLiquidity() {
         uint256 tokenAAmount = 1 ether;
         uint256 tokenBAmount = 10 ether;
@@ -70,7 +73,7 @@ contract DexerV2PairTest is Test {
         tokenA.transfer(address(dexerV2Pair), tokenAAmount);
         tokenB.transfer(address(dexerV2Pair), tokenBAmount);
 
-        dexerV2Pair.mint();
+        dexerV2Pair.mint({to: LIQUIDITY_USER});
 
         vm.stopPrank();
         _;
@@ -79,8 +82,13 @@ contract DexerV2PairTest is Test {
     /*//////////////////////////////////////////////////////////////
                               Initialize
     //////////////////////////////////////////////////////////////*/
-
     function testInitialize() public {
+        vm.startPrank(FACTORY);
+
+        dexerV2Pair.initialize({_token0: address(tokenA), _token1: address(tokenB)});
+
+        vm.stopPrank();
+
         address token0 = dexerV2Pair.token0();
         address token1 = dexerV2Pair.token1();
 
@@ -88,38 +96,60 @@ contract DexerV2PairTest is Test {
         assertEq(token0, address(tokenA), "Token0 does not match expected");
         assertEq(token1, address(tokenB), "Token1 does not match expected");
 
-        // Ensure the pair contract's reserves start at zero
-        (uint256 reserve0, uint256 reserve1) = dexerV2Pair.getReserves();
-        assertEq(reserve0, 0, "Initial reserve0 is not zero");
-        assertEq(reserve1, 0, "Initial reserve1 is not zero");
+        // // Ensure the pair contract's reserves start at zero
+        _assertReserves({expectedReserve0: 0, expectedReserve1: 0});
+    }
+
+    function testInitializeRevertsIfNotFactory() public {
+        vm.startPrank(USER);
+
+        vm.expectRevert(DexerV2Pair.DexerV2Pair__Unauthorized.selector);
+        dexerV2Pair.initialize({_token0: address(tokenA), _token1: address(tokenB)});
+
+        vm.stopPrank();
+    }
+
+    function testInitializeRevertsIfAlreadyInitialized() public {
+        vm.startPrank(FACTORY);
+
+        // Initialize once
+        dexerV2Pair.initialize({_token0: address(tokenA), _token1: address(tokenB)});
+
+        // Initialize again
+        vm.expectRevert(DexerV2Pair.DexerV2Pair__AlreadyInitialized.selector);
+        dexerV2Pair.initialize({_token0: address(tokenA), _token1: address(tokenB)});
+
+        vm.stopPrank();
     }
 
     /*//////////////////////////////////////////////////////////////
                               Mint
     //////////////////////////////////////////////////////////////*/
-    function testMintWithNoLiquidity() public {
+    function testMintWithNoLiquidity() public initialized {
         uint256 tokenAAmount = 1 ether;
         uint256 tokenBAmount = 10 ether;
 
-        vm.startPrank(USER); // Start prank
+        // Add liquidity
+        vm.startPrank(USER);
 
         tokenA.transfer(address(dexerV2Pair), tokenAAmount);
         tokenB.transfer(address(dexerV2Pair), tokenBAmount);
 
-        uint256 lpTokensMinted = dexerV2Pair.mint();
+        uint256 lpTokensMinted = dexerV2Pair.mint({to: USER});
 
-        vm.stopPrank(); // End prank
+        vm.stopPrank();
 
-        uint256 lpTokenSupplyAfter = dexerV2Pair.totalSupply();
+        // Asserts reserves
+        _assertReserves(tokenAAmount, tokenBAmount);
+
         uint256 UserLPTokenBalanceAfter = dexerV2Pair.balanceOf(USER);
 
-        // Asserts
-        assertReserves(tokenAAmount, tokenBAmount);
-        assertEq(lpTokenSupplyAfter, Math.sqrt(tokenAAmount * tokenBAmount), "Unexpected amount of LP tokens minted");
+        // Assert LP minted
+        assertEq(lpTokensMinted, Math.sqrt(tokenAAmount * tokenBAmount), "Unexpected amount of LP tokens minted");
         assertEq(UserLPTokenBalanceAfter, lpTokensMinted, "LP tokens should be minted for the USER");
     }
 
-    function testMintWithLiquidity() public withLiquidity {
+    function testMintWithLiquidity() public initialized withLiquidity {
         uint256 tokenAAmount = 1 ether;
         uint256 tokenBAmount = 10 ether;
 
@@ -128,12 +158,13 @@ contract DexerV2PairTest is Test {
         uint256 lpTokenSupplyBefore = dexerV2Pair.totalSupply();
         uint256 UserLPTokenBalanceBefore = dexerV2Pair.balanceOf(USER);
 
+        // Add liquidity
         vm.startPrank(USER);
 
         tokenA.transfer(address(dexerV2Pair), tokenAAmount);
         tokenB.transfer(address(dexerV2Pair), tokenBAmount);
 
-        uint256 lpTokensMinted = dexerV2Pair.mint();
+        uint256 lpTokensMinted = dexerV2Pair.mint({to: USER});
 
         vm.stopPrank();
 
@@ -141,18 +172,22 @@ contract DexerV2PairTest is Test {
         uint256 lpTokenSupplyAfter = dexerV2Pair.totalSupply();
         uint256 UserLPTokenBalanceAfter = dexerV2Pair.balanceOf(USER);
 
+        // Expected variables
         uint256 expectedTotalLPTokenSupply = lpTokenSupplyBefore + lpTokensMinted;
         uint256 expectedReserve0 = reserve0Before + tokenAAmount;
         uint256 expectedReserve1 = reserve1Before + tokenBAmount;
-        // Asserts
+
+        // Assert LP token total supply
         assertEq(lpTokenSupplyAfter, expectedTotalLPTokenSupply, "Unexpected total LP token supply");
 
+        // Assert users lp token balance
         assertEq(UserLPTokenBalanceAfter, UserLPTokenBalanceBefore + lpTokensMinted, "Unexpected User LP token balance");
 
-        assertReserves({expectedReserve0: expectedReserve0, expectedReserve1: expectedReserve1});
+        // Assert reserves
+        _assertReserves({expectedReserve0: expectedReserve0, expectedReserve1: expectedReserve1});
     }
 
-    function testMintUnbalanced() public withLiquidity {
+    function testMintUnbalanced() public initialized withLiquidity {
         // With liquidity modifier gives us a A:B ratio of 1:10
         uint256 tokenAAmount = 1 ether;
         uint256 tokenBAmount = 100 ether;
@@ -161,12 +196,13 @@ contract DexerV2PairTest is Test {
         (uint256 reserve0Before, uint256 reserve1Before) = dexerV2Pair.getReserves();
         uint256 lpTokenSupplyBefore = dexerV2Pair.totalSupply();
 
+        // Add liquidity
         vm.startPrank(USER);
 
         tokenA.transfer(address(dexerV2Pair), tokenAAmount);
         tokenB.transfer(address(dexerV2Pair), tokenBAmount);
 
-        uint256 lpTokensMinted = dexerV2Pair.mint();
+        uint256 lpTokensMinted = dexerV2Pair.mint({to: USER});
 
         vm.stopPrank();
 
@@ -177,20 +213,39 @@ contract DexerV2PairTest is Test {
         // Asserts
         // Any excess tokens should not be considered, therefore the LP tokens should be doubled in this case.
         assertEq(lpTokensMinted, lpTokenSupplyBefore, "LP tokens minted be minted in terms of the minimum reserve");
-        assertReserves({expectedReserve0: expectedReserve0, expectedReserve1: expectedReserve1});
+
+        // Assert reserves
+        _assertReserves({expectedReserve0: expectedReserve0, expectedReserve1: expectedReserve1});
     }
 
-    function testMintRevertsWithInsufficientTokens() public {
+    function testMintRevertsWithInsufficientToken0() public initialized {
         uint256 tokenAAmount = 1 ether;
         uint256 tokenBAmount = 0 ether;
 
+        // Add liquidity
         vm.startPrank(USER);
 
         tokenA.transfer(address(dexerV2Pair), tokenAAmount);
         tokenB.transfer(address(dexerV2Pair), tokenBAmount);
 
         vm.expectRevert(DexerV2Pair.DexerV2pair__InsufficientLiquidityMint.selector);
-        dexerV2Pair.mint();
+        dexerV2Pair.mint({to: USER});
+
+        vm.stopPrank();
+    }
+
+    function testMintRevertsWithInsufficientToken1() public initialized {
+        uint256 tokenAAmount = 0 ether;
+        uint256 tokenBAmount = 1 ether;
+
+        // Add liquidity
+        vm.startPrank(USER);
+
+        tokenA.transfer(address(dexerV2Pair), tokenAAmount);
+        tokenB.transfer(address(dexerV2Pair), tokenBAmount);
+
+        vm.expectRevert(DexerV2Pair.DexerV2pair__InsufficientLiquidityMint.selector);
+        dexerV2Pair.mint({to: USER});
 
         vm.stopPrank();
     }
@@ -198,30 +253,35 @@ contract DexerV2PairTest is Test {
     /*//////////////////////////////////////////////////////////////
                               Burn
     //////////////////////////////////////////////////////////////*/
-    function testBurn() public withLiquidity {
-        assertReserves({expectedReserve0: 1 ether, expectedReserve1: 10 ether});
+    function testBurn() public initialized withLiquidity {
+        _assertReserves({expectedReserve0: 1 ether, expectedReserve1: 10 ether});
 
         uint256 userLpTokenBalanceBefore = dexerV2Pair.balanceOf(LIQUIDITY_USER);
+
+        // Burn LP
         vm.startPrank(LIQUIDITY_USER);
 
-        dexerV2Pair.transfer(address(dexerV2Pair), userLpTokenBalanceBefore);
+        dexerV2Pair.transfer(address(dexerV2Pair), userLpTokenBalanceBefore); // Transfer the whole balance
 
         dexerV2Pair.burn({to: LIQUIDITY_USER});
 
         vm.stopPrank();
 
+        // Variables after burn
         uint256 userLpTokenBalanceAfter = dexerV2Pair.balanceOf(LIQUIDITY_USER);
         uint256 userTokenABalanceAfter = tokenA.balanceOf(LIQUIDITY_USER);
         uint256 userTokenBBalanceAfter = tokenB.balanceOf(LIQUIDITY_USER);
 
+        // Assert USER's token balances
         assertEq(userLpTokenBalanceAfter, 0, "All LP tokens should be burned");
         assertEq(userTokenABalanceAfter, 100 ether, "Unexpected amount of token A balance after burn");
         assertEq(userTokenBBalanceAfter, 100 ether, "Unexpected amount of token B balance after burn");
 
-        assertReserves({expectedReserve0: 0, expectedReserve1: 0});
+        // Assert reserves
+        _assertReserves({expectedReserve0: 0, expectedReserve1: 0});
     }
 
-    function testBurnRevertsWithNoLiquidity() public {
+    function testBurnRevertsWithNoLiquidity() public initialized {
         vm.startPrank(USER);
 
         vm.expectRevert(DexerV2Pair.DexerV2pair__InsufficientLiquidityBurn.selector);
@@ -230,7 +290,7 @@ contract DexerV2PairTest is Test {
         vm.stopPrank();
     }
 
-    function testBurnBurnsLPToken() public withLiquidity {
+    function testBurnBurnsLPToken() public initialized withLiquidity {
         // Variables before tx
         uint256 lpTokenSupplyBefore = dexerV2Pair.totalSupply();
         uint256 userLPTokenBalanceBefore = dexerV2Pair.balanceOf(LIQUIDITY_USER);
@@ -253,7 +313,7 @@ contract DexerV2PairTest is Test {
         assertEq(lpTokenSupplyAfter, 0, "LP tokens balanced should be zero after burn");
     }
 
-    function testBurnDepletesReserves() public withLiquidity {
+    function testBurnDepletesReserves() public initialized withLiquidity {
         // Variables before tx
         (uint256 reserveABefore, uint256 reserveBBefore) = dexerV2Pair.getReserves();
         uint256 userLPTokenBalanceBefore = dexerV2Pair.balanceOf(LIQUIDITY_USER);
@@ -275,11 +335,11 @@ contract DexerV2PairTest is Test {
         assertEq(reserveBAfter, 0, "Unexpected TokenB reserves after burn");
     }
 
-    function testBurnReturnsCorrectTokensAmount() public withLiquidity {
+    function testBurnReturnsCorrectTokensAmount() public initialized withLiquidity {
         uint256 userLPTokenBalanceBefore = dexerV2Pair.balanceOf(LIQUIDITY_USER);
         uint256 amountOfLPTokenToBurn = userLPTokenBalanceBefore / 2; // 50% of total users balance
 
-        assertReserves({expectedReserve0: 1 ether, expectedReserve1: 10 ether});
+        _assertReserves({expectedReserve0: 1 ether, expectedReserve1: 10 ether});
 
         vm.startPrank(LIQUIDITY_USER);
 
@@ -292,14 +352,14 @@ contract DexerV2PairTest is Test {
         console.log("TokenAReturned: ", tokenAReturned);
         console.log("TokenBReturned: ", tokenBReturned);
 
-        assertReserves({expectedReserve0: 0.5 ether, expectedReserve1: 5 ether});
+        _assertReserves({expectedReserve0: 0.5 ether, expectedReserve1: 5 ether});
     }
 
     /*//////////////////////////////////////////////////////////////
                               Swap
     //////////////////////////////////////////////////////////////*/
 
-    function testSwap() public withLiquidity {
+    function testSwap() public initialized withLiquidity {
         uint256 amountAIn = 1 ether;
         uint256 amountBIn = 0 ether;
         uint256 amountAOut = 0 ether;
@@ -319,10 +379,10 @@ contract DexerV2PairTest is Test {
         uint256 expectedReserveA = reserveABefore + amountAIn - amountAOut;
         uint256 expectedReserveB = reserveBBefore + amountBIn - amountBOut;
 
-        assertReserves(expectedReserveA, expectedReserveB);
+        _assertReserves(expectedReserveA, expectedReserveB);
     }
 
-    function testSwapOtherToken() public withLiquidity {
+    function testSwapOtherToken() public initialized withLiquidity {
         uint256 amountAIn = 0 ether;
         uint256 amountBIn = 1 ether;
         uint256 amountAOut = 0.09 ether;
@@ -342,10 +402,10 @@ contract DexerV2PairTest is Test {
         uint256 expectedReserveA = reserveABefore + amountAIn - amountAOut;
         uint256 expectedReserveB = reserveBBefore + amountBIn - amountBOut;
 
-        assertReserves(expectedReserveA, expectedReserveB);
+        _assertReserves(expectedReserveA, expectedReserveB);
     }
 
-    function testSwapRevertsIfOverpriced() public withLiquidity {
+    function testSwapRevertsIfOverpriced() public initialized withLiquidity {
         uint256 amountAIn = 1 ether;
         uint256 amountBIn = 0 ether;
         uint256 amountAOut = 0 ether;
@@ -362,7 +422,7 @@ contract DexerV2PairTest is Test {
         vm.stopPrank();
     }
 
-    function testSwapRevertsIfOverpricedOtherToken() public withLiquidity {
+    function testSwapRevertsIfOverpricedOtherToken() public initialized withLiquidity {
         uint256 amountAIn = 0 ether;
         uint256 amountBIn = 1 ether;
         uint256 amountAOut = 0.5 ether;
@@ -379,7 +439,7 @@ contract DexerV2PairTest is Test {
         vm.stopPrank();
     }
 
-    function testSwapRevertsIfInsufficientLiquidity() public withLiquidity {
+    function testSwapRevertsIfInsufficientLiquidity() public initialized withLiquidity {
         uint256 amountAIn = 1 ether;
         uint256 amountBIn = 0 ether;
         uint256 amountAOut = 0 ether;
@@ -396,7 +456,7 @@ contract DexerV2PairTest is Test {
         vm.stopPrank();
     }
 
-    function testSwapRevertsIfZeroOutput() public withLiquidity {
+    function testSwapRevertsIfZeroOutput() public initialized withLiquidity {
         uint256 amountAIn = 1 ether;
         uint256 amountBIn = 0 ether;
         uint256 amountAOut = 0 ether;
@@ -413,7 +473,7 @@ contract DexerV2PairTest is Test {
         vm.stopPrank();
     }
 
-    function testSwapRevertsIfZeroInput() public withLiquidity {
+    function testSwapRevertsIfZeroInput() public initialized withLiquidity {
         uint256 amountAIn = 0 ether;
         uint256 amountBIn = 0 ether;
         uint256 amountAOut = 0 ether;

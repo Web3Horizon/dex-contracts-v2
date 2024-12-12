@@ -57,4 +57,12 @@ contract DexerV2Factory is IDexerV2Factory {
 
         emit PairCreated(token0, token1, pair, allPairs.length);
     }
+
+    /**
+     * @notice Retrieves all pair contracts addresses
+     * @return _pairs An array containing all the pair contracts addresses created by this factory.
+     */
+    function getAllPairs() external view returns (address[] memory _pairs) {
+        return allPairs;
+    }
 }

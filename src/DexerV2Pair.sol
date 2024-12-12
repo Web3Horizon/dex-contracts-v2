@@ -19,8 +19,8 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
     uint256 private reserve1;
 
     /* **** Events **** */
-    event Burn(address sender, uint256 amount0, uint256 amount1, address to);
-    event Mint(address sender, uint256 amount0, uint256 amount1);
+    event Burn(address indexed sender, uint256 amount0, uint256 amount1, address indexed to);
+    event Mint(address indexed sender, uint256 amount0, uint256 amount1, address indexed to);
     event Swap(address indexed sender, uint256 amount0Out, uint256 amount1Out, address indexed to);
 
     /* **** Errors **** */
@@ -40,11 +40,14 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
 
     /**
      * @notice Sets the pair contract with the two token addresses.
+     *
      * @dev This function can only be called once to prevent reinitialization.
      *      Ensures that the token addresses are set for the contract and
      *      enforces that the contract has not been initialized already.
+     *
      * @param _token0 The address of the first token in the pair.
      * @param _token1 The address of the second token in the pair.
+     *
      * @custom:reverts DexerV2Pair__AlreadyInitialized If the contract has already been initialized with token addresses.
      */
     function initialize(address _token0, address _token1) external {
@@ -61,10 +64,21 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
     }
 
     /**
-     * @dev Mints LP tokens to the caller.
-     * @return The amount of LP tokens minted.
+     * @notice WARNING: Interacting with this function directly can lead to token loss.
+     *         designed to be called from the router contract.
+     *
+     * @notice Mints LP tokens to the recipient address(`to`) based on the tokens deposited.
+     *
+     * @dev This function calculates the amount of LP tokens to mint based on the amount of `token0` and `token1` deposited.
+     *      It ensures that the minted LP tokens are proportional to the contributions and reserves in the pool.
+     *
+     * @param to The address of the recipient of the LP tokens minted.
+     *
+     * @return amountLPToken The amount of LP tokens minted to the recipient `to` address.
+     *
+     * @custom:reverts DexerV2pair__InsufficientLiquidityMint if the amount of `token0` OR `token1` provided is zero.
      */
-    function mint() external returns (uint256) {
+    function mint(address to) external returns (uint256 amountLPToken) {
         // The balance after tokens have been sent
         uint256 balance0 = IERC20(token0).balanceOf(address(this));
         uint256 balance1 = IERC20(token1).balanceOf(address(this));
@@ -73,40 +87,47 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
         uint256 amount0 = balance0 - reserve0;
         uint256 amount1 = balance1 - reserve1;
 
-        uint256 liquidity;
         uint256 _totalSupply = totalSupply();
 
         if (_totalSupply == 0) {
-            liquidity = Math.sqrt(amount0 * amount1);
+            amountLPToken = Math.sqrt(amount0 * amount1);
         } else {
-            // Get the minimum liquidity contribution
+            // Get the minimum amount of LP tokens to mint based on the tokens contribution
             uint256 liquidity0 = (_totalSupply * amount0) / reserve0;
             uint256 liquidity1 = (_totalSupply * amount1) / reserve1;
-            liquidity = Math.min(liquidity0, liquidity1);
+            amountLPToken = Math.min(liquidity0, liquidity1);
         }
 
-        if (liquidity == 0) {
+        // If no the amount to mint is 0, revert
+        if (amountLPToken == 0) {
             revert DexerV2pair__InsufficientLiquidityMint();
         }
 
         // Mint tokens
-        _mint(msg.sender, liquidity);
+        _mint(to, amountLPToken);
 
         // Update balances
         _update(balance0, balance1);
 
-        // Event
-        emit Mint(msg.sender, amount0, amount1);
+        // Emit event
+        emit Mint(msg.sender, amount0, amount1, to);
 
-        return liquidity;
+        return amountLPToken;
     }
 
     /**
-     * @dev Removes liquidity from the pool by burning LP tokens and transferring the corresponding
-     *      amounts of token0 and token1 to the specified address.
-     * @param to The address to receive the withdrawn amounts of token0 and token1.
+     * @notice WARNING: Interacting with this function directly can lead to token loss.
+     *         designed to be called from the router contract.
+     *
+     * @dev Removes liquidity from the pool by burning LP tokens held by the contract and
+     *      transferring the proportional amounts of `token0` and `token1` to the specified address.
+     *
+     * @param to The address to receive the withdrawn amounts of `token0` and `token1`.
+     *
      * @return amount0 The amount of token0 transferred to the `to` address.
      * @return amount1 The amount of token1 transferred to the `to` address.
+     *
+     * @custom:reverts DexerV2pair__InsufficientLiquidityBurn if the pool's LP token balance is zero (No LP token were sent to the contract to burn).
      */
     function burn(address to) external returns (uint256 amount0, uint256 amount1) {
         address _token0 = token0;
@@ -114,16 +135,19 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
         uint256 balance0 = IERC20(_token0).balanceOf(address(this));
         uint256 balance1 = IERC20(_token1).balanceOf(address(this));
 
+        // The amount of tokens being held by the contract (Different from total supply )
         uint256 poolLPTokens = balanceOf(address(this));
 
         if (poolLPTokens == 0) {
             revert DexerV2pair__InsufficientLiquidityBurn();
         }
 
+        // Calculate the amount of token0 and token1
         uint256 _totalSupply = totalSupply();
         uint256 amount0ToTransfer = (poolLPTokens * balance0) / _totalSupply;
         uint256 amount1ToTransfer = (poolLPTokens * balance1) / _totalSupply;
 
+        // Burn the tokens
         _burn(address(this), poolLPTokens);
 
         // Transfer tokens
@@ -136,6 +160,7 @@ contract DexerV2Pair is IDexerV2Pair, ERC20 {
         // Update reserves
         _update(balance0, balance1);
 
+        // Emit event
         emit Burn(msg.sender, amount0ToTransfer, amount1ToTransfer, to);
 
         return (amount0ToTransfer, amount1ToTransfer);
