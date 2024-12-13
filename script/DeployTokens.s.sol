@@ -11,22 +11,22 @@ contract DeployTokens is Script {
         vm.startBroadcast();
 
         MockERC20 gold = new MockERC20("GOLD", "GLD");
-        gold.mint(msg.sender, 1000);
+        gold.mint(msg.sender, 1000 ether);
         console.log(address(gold));
         MockERC20 silver = new MockERC20("SILVER", "SLV");
-        silver.mint(msg.sender, 1000);
+        silver.mint(msg.sender, 1000 ether);
         console.log(address(silver));
         MockERC20 platinum = new MockERC20("PLATINUM", "PLT");
-        platinum.mint(msg.sender, 1000);
+        platinum.mint(msg.sender, 1000 ether);
         console.log(address(platinum));
         MockERC20 ruby = new MockERC20("RUBY", "RUBY");
-        ruby.mint(msg.sender, 1000);
+        ruby.mint(msg.sender, 1000 ether);
         console.log(address(ruby));
         MockERC20 emerald = new MockERC20("EMERALD", "EMR");
-        emerald.mint(msg.sender, 1000);
+        emerald.mint(msg.sender, 1000 ether);
         console.log(address(emerald));
         MockERC20 diamond = new MockERC20("DIAMOND", "DMND");
-        diamond.mint(msg.sender, 1000);
+        diamond.mint(msg.sender, 1000 ether);
         console.log(address(diamond));
 
         vm.stopBroadcast();
